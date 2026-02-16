@@ -1,0 +1,85 @@
+﻿{% extends "base.html" %}
+{% block title %}{{ 'Edit' if webui else 'New' }} WebUI | WebUI Manager{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto">
+  <h1 class="font-display text-3xl text-cyan-200 mb-2">{{ 'Edit WebUI' if webui else 'Add New WebUI' }}</h1>
+  <p class="text-slate-300 text-sm mb-6">Favicon is discovered automatically from the target URL when you save.</p>
+
+  <form method="post" class="rounded-xl border border-slate-800 bg-panel/70 p-6 space-y-5">
+    {% if webui and webui.favicon_url %}
+      <div class="flex items-center gap-2 text-sm text-slate-300">
+        <img src="{{ webui.favicon_url }}" alt="favicon" class="h-5 w-5 rounded" />
+      </div>
+    {% endif %}
+
+    <div class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Name</label>
+        <input name="name" value="{{ webui.name if webui else request.form.get('name', '') }}" required class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+      </div>
+      <div>
+        <label class="block text-sm mb-1">URL</label>
+        <input name="url" value="{{ webui.url if webui else request.form.get('url', '') }}" required placeholder="https://example.local" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm mb-1">Description (optional)</label>
+      <textarea name="description" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">{{ webui.description if webui else request.form.get('description', '') }}</textarea>
+    </div>
+
+    <div class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Host</label>
+        <select name="host_id" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">
+          <option value="">No host</option>
+          {% for host in hosts %}
+            <option value="{{ host.id }}" {% if selected_host_id == (host.id | string) %}selected{% endif %}>{{ host.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Categories</label>
+        <div class="max-h-40 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 space-y-2">
+          {% for category in categories %}
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="category_ids" value="{{ category.id }}" {% if (category.id | string) in selected_category_ids %}checked{% endif %} class="rounded border-slate-600 bg-slate-800 text-cyan-400" />
+              {{ category.name }}
+            </label>
+          {% endfor %}
+          {% if not categories %}
+            <p class="text-sm text-slate-400">No categories yet. Add one from the Categories page.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <h2 class="font-display text-xl mb-3"><i class="fa-solid fa-key mr-2 text-amber-300"></i>Stored Credentials (Optional)</h2>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm mb-1">Username</label>
+          <input name="credential_username" value="{{ webui.credential_username if webui else request.form.get('credential_username', '') }}" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Password {% if webui and webui.credential_password_encrypted %}<span class="text-xs text-slate-400">(leave blank to keep existing)</span>{% endif %}</label>
+          <input name="credential_password" type="password" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+        </div>
+      </div>
+      {% if webui and (webui.credential_username or webui.credential_password_encrypted) %}
+      <label class="flex items-center gap-2 text-sm mt-3 text-rose-200">
+        <input type="checkbox" name="clear_credentials" value="1" class="rounded border-slate-600 bg-slate-800 text-rose-400" />
+        Clear stored credentials on save
+      </label>
+      {% endif %}
+    </div>
+
+    <div class="flex gap-3">
+      <button type="submit" class="rounded-lg bg-cyan-500 px-5 py-2 text-slate-950 font-semibold hover:bg-cyan-400 transition">
+        <i class="fa-solid fa-floppy-disk mr-1"></i>Save
+      </button>
+      <a href="{{ url_for('main.webui_list') }}" class="rounded-lg border border-slate-700 px-5 py-2 hover:bg-slate-800 transition">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

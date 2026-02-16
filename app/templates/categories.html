@@ -1,0 +1,39 @@
+﻿{% extends "base.html" %}
+{% block title %}Categories | WebUI Manager{% endblock %}
+{% block content %}
+<div class="grid lg:grid-cols-3 gap-5">
+  <section class="lg:col-span-1 rounded-xl border border-slate-800 bg-panel/70 p-5">
+    <h1 class="font-display text-2xl text-cyan-200 mb-3">Add Category</h1>
+    <form method="post" class="space-y-3">
+      <div>
+        <label class="block text-sm mb-1">Name</label>
+        <input name="name" required class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Description</label>
+        <textarea name="description" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40"></textarea>
+      </div>
+      <button class="rounded-lg bg-cyan-500 px-4 py-2 text-slate-950 font-semibold hover:bg-cyan-400 transition" type="submit">Create Category</button>
+    </form>
+  </section>
+
+  <section class="lg:col-span-2 rounded-xl border border-slate-800 bg-panel/70 p-5">
+    <h2 class="font-display text-2xl mb-3">Existing Categories</h2>
+    {% if categories %}
+      <div class="space-y-3">
+        {% for category in categories %}
+          <div class="rounded-lg border border-slate-800 bg-slate-900/55 p-3 flex justify-between gap-3 items-start">
+            <div>
+              <p class="font-semibold">{{ category.name }}</p>
+              {% if category.description %}<p class="text-sm text-slate-300">{{ category.description }}</p>{% endif %}
+            </div>
+            <button class="rounded-lg border border-rose-800 bg-rose-900/30 px-3 py-1.5 text-sm hover:bg-rose-800/40 delete-btn" data-url="{{ url_for('main.delete_category', category_id=category.id) }}" data-confirm="Delete this category?">Delete</button>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-slate-300">No categories yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.gitignore
+*.jpg
+*.png
+README.md
+docker-compose.yml
+LICENSE
+VERSION
+docker-image-build.sh
+build-tailwind.sh

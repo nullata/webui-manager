@@ -1,0 +1,60 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}WebUI Manager{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
+<link rel="stylesheet" href="{{ url_for('static', filename='fontawesome-free-7.1.0-web/css/all.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+</head>
+<body class="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_0%_10%,rgba(34,211,238,.15),transparent_45%),radial-gradient(circle_at_100%_90%,rgba(251,113,133,.15),transparent_45%)] text-ink font-body">
+  <div id="confirm-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/60">
+    <div class="rounded-xl border border-slate-700 bg-slate-900 p-6 max-w-sm w-full mx-4 shadow-neon">
+      <p class="font-display text-lg text-ink mb-1">Are you sure?</p>
+      <p id="confirm-modal-message" class="text-sm text-slate-300 mb-5"></p>
+      <div class="flex gap-3 justify-end">
+        <button id="confirm-modal-ok" class="rounded-lg bg-rose-600 hover:bg-rose-500 px-4 py-2 text-sm font-semibold transition">Delete</button>
+        <button id="confirm-modal-cancel" class="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm font-semibold transition">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="error-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/60">
+    <div class="rounded-xl border border-rose-800 bg-slate-900 p-6 max-w-sm w-full mx-4 shadow-neon">
+      <p class="font-display text-lg text-rose-300 mb-1">Cannot Delete</p>
+      <p id="error-modal-message" class="text-sm text-slate-300 mb-5"></p>
+      <div class="flex justify-end">
+        <button id="error-modal-dismiss" class="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm font-semibold transition">Dismiss</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    {% if current_user %}
+      {% include 'partials/nav.html' %}
+    {% endif %}
+
+    {% if current_user %}<div class="h-16"></div>{% endif %}
+    <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="space-y-2 mb-5">
+            {% for category, message in messages %}
+              {% set is_error = category == 'error' %}
+              {% set is_success = category == 'success' %}
+              <div class="rounded-xl px-4 py-3 border text-sm {{ 'bg-rose-900/30 border-rose-700 text-rose-100' if is_error else 'bg-emerald-900/20 border-emerald-700 text-emerald-100' if is_success else 'bg-cyan-900/20 border-cyan-700 text-cyan-100' }}">
+                {{ message }}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>
