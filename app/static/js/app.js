@@ -78,6 +78,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  document.querySelectorAll('button.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.edit-card');
+      const display = card.querySelector('.host-display, .category-display');
+      const form = card.querySelector('.edit-form');
+      display.classList.add('hidden');
+      form.classList.remove('hidden');
+    });
+  });
+
+  document.querySelectorAll('button.edit-cancel').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.edit-card');
+      const display = card.querySelector('.host-display, .category-display');
+      const form = card.querySelector('.edit-form');
+      form.classList.add('hidden');
+      display.classList.remove('hidden');
+    });
+  });
+
   document.querySelectorAll('button.credentials-btn').forEach(btn => {
     const article = btn.closest('article');
     const panel = article.querySelector('.credentials-panel');

@@ -313,6 +313,29 @@ def delete_host(host_id: int):
     return redirect(url_for("main.hosts_page"))
 
 
+@main_bp.route("/hosts/<int:host_id>/edit", methods=["POST"])
+@login_required
+def edit_host(host_id: int):
+    host = db.get_or_404(Host, host_id)
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip() or ''
+
+    if not name:
+        flash("Host name is required.", "error")
+        return redirect(url_for("main.hosts_page"))
+
+    host.name = name
+    host.description = description
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Host name must be unique.", "error")
+    else:
+        flash("Host updated.", "success")
+    return redirect(url_for("main.hosts_page"))
+
+
 @main_bp.route("/categories", methods=["GET", "POST"])
 @login_required
 def categories_page():
@@ -355,4 +378,27 @@ def delete_category(category_id: int):
     db.session.delete(category)
     db.session.commit()
     flash("Category removed.", "info")
+    return redirect(url_for("main.categories_page"))
+
+
+@main_bp.route("/categories/<int:category_id>/edit", methods=["POST"])
+@login_required
+def edit_category(category_id: int):
+    category = db.get_or_404(Category, category_id)
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip() or ''
+
+    if not name:
+        flash("Category name is required.", "error")
+        return redirect(url_for("main.categories_page"))
+
+    category.name = name
+    category.description = description
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Category name must be unique.", "error")
+    else:
+        flash("Category updated.", "success")
     return redirect(url_for("main.categories_page"))

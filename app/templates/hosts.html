@@ -22,12 +22,31 @@
     {% if hosts %}
       <div class="space-y-3">
         {% for host in hosts %}
-          <div class="rounded-lg border border-slate-800 bg-slate-900/55 p-3 flex justify-between gap-3 items-start">
-            <div>
-              <p class="font-semibold">{{ host.name }}</p>
-              {% if host.description %}<p class="text-sm text-slate-300">{{ host.description }}</p>{% endif %}
+          <div class="edit-card rounded-lg border border-slate-800 bg-slate-900/55 p-3">
+            <div class="flex justify-between gap-3 items-start host-display">
+              <div>
+                <p class="font-semibold">{{ host.name }}</p>
+                {% if host.description %}<p class="text-sm text-slate-300">{{ host.description }}</p>{% endif %}
+              </div>
+              <div class="flex gap-2 shrink-0">
+                <button class="rounded-lg border border-amber-700 bg-amber-900/30 px-3 py-1.5 text-sm hover:bg-amber-800/40 edit-btn">Edit</button>
+                <button class="rounded-lg border border-rose-800 bg-rose-900/30 px-3 py-1.5 text-sm hover:bg-rose-800/40 delete-btn" data-url="{{ url_for('main.delete_host', host_id=host.id) }}" data-confirm="Delete this host?">Delete</button>
+              </div>
             </div>
-            <button class="rounded-lg border border-rose-800 bg-rose-900/30 px-3 py-1.5 text-sm hover:bg-rose-800/40 delete-btn" data-url="{{ url_for('main.delete_host', host_id=host.id) }}" data-confirm="Delete this host?">Delete</button>
+            <form method="post" action="{{ url_for('main.edit_host', host_id=host.id) }}" class="hidden edit-form space-y-3 mt-2">
+              <div>
+                <label class="block text-sm mb-1">Name</label>
+                <input name="name" value="{{ host.name }}" required class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+              </div>
+              <div>
+                <label class="block text-sm mb-1">Description</label>
+                <textarea name="description" rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">{{ host.description or '' }}</textarea>
+              </div>
+              <div class="flex gap-2">
+                <button type="submit" class="rounded-lg bg-cyan-500 px-4 py-1.5 text-slate-950 font-semibold text-sm hover:bg-cyan-400 transition">Save</button>
+                <button type="button" class="rounded-lg border border-slate-700 px-4 py-1.5 text-sm hover:bg-slate-800 transition edit-cancel">Cancel</button>
+              </div>
+            </form>
           </div>
         {% endfor %}
       </div>
