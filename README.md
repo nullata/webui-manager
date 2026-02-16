@@ -1,6 +1,6 @@
-![webuiception](app/static/images/webuimuch.jpg "webuiception")
+![webuiception](app/static/images/dank.jpg "webuiception")
 
-# WebUI Manager
+# <img src="app/static/images/logo.svg" alt="logo" width="24"> WebUI Manager
 
 A self-hosted Flask app for organizing and launching your internal web services. Stores service URLs grouped by host with optional credentials, category tags, and auto-discovered favicons.
 
