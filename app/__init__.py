@@ -14,7 +14,7 @@
 
 from threading import Lock
 
-from flask import Flask, request
+from flask import Flask, render_template, request
 
 from .config import Config
 from .models import db
@@ -94,5 +94,34 @@ def create_app() -> Flask:
         db.session.add(user)
         db.session.commit()
         print(f"Admin user '{username}' created.")
+
+################
+# error handlers
+################
+
+
+    @app.errorhandler(404)
+    def not_found(e):
+        return render_template("error.html", error_code=404,
+                               error_title="Not Found",
+                               error_description="The page you're looking for doesn't exist."), 404
+
+    @app.errorhandler(403)
+    def forbidden(e):
+        return render_template("error.html", error_code=403,
+                               error_title="Forbidden",
+                               error_description="You don't have permission to access this resource."), 403
+
+    @app.errorhandler(405)
+    def method_not_allowed(e):
+        return render_template("error.html", error_code=405,
+                               error_title="Method Not Allowed",
+                               error_description="The request method is not supported for this endpoint."), 405
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        return render_template("error.html", error_code=500,
+                               error_title="Internal Server Error",
+                               error_description="Something went wrong on our end. Please try again later."), 500
 
     return app
