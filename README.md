@@ -32,8 +32,16 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your DB credentials and a strong SECRET_KEY
 
-# 4. Create the database
-mysql -u root -p -e "CREATE DATABASE webui_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+# 4. Create the database and user
+mysql -u root -p <<'SQL'
+CREATE DATABASE IF NOT EXISTS webui_manager
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'webui'@'localhost' IDENTIFIED BY 'changeme';
+GRANT ALL PRIVILEGES ON webui_manager.* TO 'webui'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+# Then set DB_USER=webui, DB_PASSWORD=changeme (or your chosen values) in .env
 
 # 5. Run
 flask --app run.py run
@@ -55,36 +63,6 @@ Tables are created automatically on the first request. Navigate to `/` and follo
 | `APP_CREDENTIALS_KEY` | No | Separate key for credential encryption (falls back to `SECRET_KEY`) |
 | `AUTO_MIGRATE` | No | Auto-create tables on first request (default: `true`) |
 
-## Project Structure
-
-```
-app/
-├── __init__.py        # App factory, CLI commands
-├── auth.py            # Login, logout, session auth, decorators
-├── config.py          # Environment-based configuration
-├── models.py          # SQLAlchemy models
-├── routes.py          # CRUD routes
-├── utils.py           # URL normalization, favicon resolution, encryption
-├── static/
-│   ├── css/
-│   │   └── app.css            # Style overrides
-│   ├── js/
-│   │   └── app.js             # Client-side behaviour
-│   └── images/
-│       └── favicon.ico
-└── templates/
-    ├── base.html
-    ├── partials/
-    │   └── nav.html
-    ├── login.html
-    ├── setup_admin.html
-    ├── webui_list.html
-    ├── webui_form.html
-    ├── hosts.html
-    └── categories.html
-run.py                 # Entry point
-```
-
 ## Docker Hub
 
 The image is published at [nullata/webui-manager](https://hub.docker.com/r/nullata/webui-manager).
@@ -98,6 +76,114 @@ Or use it directly in your `docker-compose.yml`:
 ```yaml
 image: nullata/webui-manager
 ```
+
+## Docker Deployment
+
+### 1. Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env - set SECRET_KEY, DB_PASSWORD, and any other values
+```
+
+### 2a. Docker Compose - build from source
+
+The included `docker-compose.yml` builds the image locally. You will need an external MySQL/MariaDB instance reachable from the container; update `DB_HOST` in `.env` accordingly.
+
+```bash
+docker compose up --build -d
+```
+
+To use the pre-built Docker Hub image instead of building locally, edit `docker-compose.yml` and swap the `build` line for the two commented-out lines:
+
+```yaml
+# build: .                          # remove or comment out
+image: nullata/webui-manager:latest  # uncomment
+pull_policy: always                  # uncomment
+```
+
+Then:
+
+```bash
+docker compose up -d
+```
+
+### 2b. Docker Compose - full stack (app + database)
+
+If you want Compose to manage the database as well, extend `docker-compose.yml` with a MariaDB service and update `DB_HOST` to match the service name:
+
+```yaml
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MARIADB_DATABASE: ${DB_NAME:-webui_manager}
+      MARIADB_USER: ${DB_USER:-webui}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+
+  app:
+    image: nullata/webui-manager:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY}
+      APP_CREDENTIALS_KEY: ${APP_CREDENTIALS_KEY:-}
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-webui}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-webui_manager}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+
+volumes:
+  db_data:
+```
+
+```bash
+docker compose up -d
+```
+
+### 2c. Plain Docker run
+
+Build the image:
+
+```bash
+docker build -t webui-manager .
+```
+
+Run the container (supply env vars inline or via `--env-file`):
+
+```bash
+docker run -d \
+  --name webui-manager \
+  --restart unless-stopped \
+  --env-file .env \
+  -p 5000:5000 \
+  webui-manager
+```
+
+Or pull the pre-built image from Docker Hub:
+
+```bash
+docker run -d \
+  --name webui-manager \
+  --restart unless-stopped \
+  --env-file .env \
+  -p 5000:5000 \
+  nullata/webui-manager:latest
+```
+
+### First run
+
+Once the container is running, navigate to `http://localhost:5000` (or your configured port). Tables are created automatically on the first request - follow the on-screen admin setup prompt.
 
 ## Third-Party Licenses
 
