@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from flask import Blueprint, flash, g, redirect, render_template, request, url_for
+from flask import Blueprint, flash, g, redirect, render_template, request, url_for, jsonify
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
@@ -253,7 +253,7 @@ def edit_webui(webui_id: int):
 @login_required
 def webui_credentials(webui_id: int):
     # returns decrypted credentials as json - called by the js reveal button on the dashboard
-    from flask import jsonify
+
     webui = db.get_or_404(WebUI, webui_id)
     return jsonify({
         "username": webui.credential_username or "",
@@ -299,10 +299,11 @@ def hosts_page():
 @main_bp.route("/hosts/<int:host_id>/delete", methods=["POST"])
 @login_required
 def delete_host(host_id: int):
-    from flask import jsonify
+
     host = db.get_or_404(Host, host_id)
     linked_count = db.session.scalar(
-        db.select(func.count()).select_from(WebUI).where(WebUI.host_id == host_id)
+        db.select(func.count()).select_from(
+            WebUI).where(WebUI.host_id == host_id)
     )
     if linked_count:
         return jsonify({"error": f'"{host.name}" has {linked_count} WebUI(s) assigned and cannot be deleted.'}), 409
@@ -365,7 +366,7 @@ def categories_page():
 @main_bp.route("/categories/<int:category_id>/delete", methods=["POST"])
 @login_required
 def delete_category(category_id: int):
-    from flask import jsonify
+
     category = db.get_or_404(Category, category_id)
     from .models import webui_categories
     linked_count = db.session.scalar(
