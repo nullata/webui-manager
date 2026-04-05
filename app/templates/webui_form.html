@@ -1,37 +1,58 @@
 ﻿{% extends "base.html" %}
-{% block title %}{{ 'Edit' if webui else 'New' }} WebUI | WebUI Manager{% endblock %}
+{% block title %}{{ 'Edit' if webui else 'New' }} Service | WebUI Manager{% endblock %}
 {% block content %}
 <div class="max-w-4xl mx-auto">
-  <h1 class="font-display text-3xl text-cyan-200 mb-2">{{ 'Edit WebUI' if webui else 'Add New WebUI' }}</h1>
-  <p class="text-slate-300 text-sm mb-6">Favicon is discovered automatically from the target URL when you save.</p>
+  <h1 class="font-display text-3xl text-white mb-2">{{ 'Edit Service' if webui else 'Add New Service' }}</h1>
+  <p class="text-slate-300 text-sm mb-6" id="form-hint">Favicon is discovered automatically from the target URL when you save.</p>
 
   <form method="post" class="rounded-xl border border-slate-800 bg-panel/70 p-6 space-y-5">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     {% if webui and webui.favicon_url %}
       <div class="flex items-center gap-2 text-sm text-slate-300">
         <img src="{{ webui.favicon_url }}" alt="favicon" class="h-5 w-5 rounded" />
       </div>
     {% endif %}
 
-    <div class="grid sm:grid-cols-2 gap-4">
+    <div class="grid sm:grid-cols-3 gap-4">
       <div>
+        <label class="block text-sm mb-1">Service Type</label>
+        <select name="service_type" id="service_type" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25">
+          {% set current_type = request.form.get('service_type', webui.service_type if webui else 'web') %}
+          {% for value, label in service_types.items() %}
+            <option value="{{ value }}" {% if current_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="sm:col-span-2">
         <label class="block text-sm mb-1">Name</label>
-        <input name="name" value="{{ webui.name if webui else request.form.get('name', '') }}" required class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+        <input name="name" value="{{ webui.name if webui else request.form.get('name', '') }}" required class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
       </div>
-      <div>
-        <label class="block text-sm mb-1">URL</label>
-        <input name="url" value="{{ webui.url if webui else request.form.get('url', '') }}" required placeholder="https://example.local" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
-      </div>
+    </div>
+
+    <div id="url-field">
+      <label class="block text-sm mb-1">URL <span id="url-optional-hint" class="text-slate-400 text-xs hidden">(optional)</span></label>
+      <input name="url" id="url-input" value="{{ webui.url if webui else request.form.get('url', '') }}" placeholder="https://example.local" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+      <p id="url-hint" class="mt-1 text-xs text-slate-400 hidden">Optional for this service type. Leave blank if there is no web interface.</p>
     </div>
 
     <div>
       <label class="block text-sm mb-1">Description (optional)</label>
-      <textarea name="description" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">{{ webui.description if webui else request.form.get('description', '') }}</textarea>
+      <textarea name="description" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25">{{ webui.description if webui else request.form.get('description', '') }}</textarea>
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <h2 class="font-display text-xl mb-3"><i class="fa-solid fa-heart-pulse mr-2 text-emerald-300"></i>Availability Check (Optional)</h2>
+      <div>
+        <label class="block text-sm mb-1">Healthcheck Endpoint</label>
+        <input name="healthcheck_url" value="{{ request.form.get('healthcheck_url', (webui.healthcheck_url or '') if webui else '') }}" placeholder="/health or https://example.local/health" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        <p class="mt-2 text-xs text-slate-400">You can enter a full URL or a relative path like <span class="font-mono">/health</span>. If blank, the background checker will use the main app URL when periodic checks are enabled in Settings.</p>
+      </div>
     </div>
 
     <div class="grid sm:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm mb-1">Host</label>
-        <select name="host_id" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">
+        <select name="host_id" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25">
           <option value="">No host</option>
           {% for host in hosts %}
             <option value="{{ host.id }}" {% if selected_host_id == (host.id | string) %}selected{% endif %}>{{ host.name }}</option>
@@ -43,7 +64,7 @@
         <div class="max-h-40 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 space-y-2">
           {% for category in categories %}
             <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="category_ids" value="{{ category.id }}" {% if (category.id | string) in selected_category_ids %}checked{% endif %} class="rounded border-slate-600 bg-slate-800 text-cyan-400" />
+              <input type="checkbox" name="category_ids" value="{{ category.id }}" {% if (category.id | string) in selected_category_ids %}checked{% endif %} class="rounded border-slate-600 bg-slate-800 text-white" />
               {{ category.name }}
             </label>
           {% endfor %}
@@ -59,11 +80,11 @@
       <div class="grid sm:grid-cols-2 gap-4">
         <div>
           <label class="block text-sm mb-1">Username</label>
-          <input name="credential_username" value="{{ webui.credential_username if webui else request.form.get('credential_username', '') }}" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+          <input name="credential_username" value="{{ webui.credential_username if webui else request.form.get('credential_username', '') }}" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
         </div>
         <div>
           <label class="block text-sm mb-1">Password {% if webui and webui.credential_password_encrypted %}<span class="text-xs text-slate-400">(leave blank to keep existing)</span>{% endif %}</label>
-          <input name="credential_password" type="password" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
+          <input name="credential_password" type="password" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
         </div>
       </div>
       {% if webui and (webui.credential_username or webui.credential_password_encrypted) %}
@@ -75,11 +96,38 @@
     </div>
 
     <div class="flex gap-3">
-      <button type="submit" class="rounded-lg bg-cyan-500 px-5 py-2 text-slate-950 font-semibold hover:bg-cyan-400 transition">
+      <button type="submit" class="rounded-lg bg-white px-5 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
         <i class="fa-solid fa-floppy-disk mr-1"></i>Save
       </button>
       <a href="{{ url_for('main.webui_list') }}" class="rounded-lg border border-slate-700 px-5 py-2 hover:bg-slate-800 transition">Cancel</a>
     </div>
   </form>
 </div>
+<script>
+(function () {
+  const typeSelect = document.getElementById('service_type');
+  const urlInput = document.getElementById('url-input');
+  const urlOptionalHint = document.getElementById('url-optional-hint');
+  const urlHint = document.getElementById('url-hint');
+  const formHint = document.getElementById('form-hint');
+
+  const URL_REQUIRED_TYPES = ['web', 'api'];
+
+  function updateUrlField() {
+    const type = typeSelect.value;
+    const urlRequired = URL_REQUIRED_TYPES.includes(type);
+    urlInput.required = urlRequired;
+    urlOptionalHint.classList.toggle('hidden', urlRequired);
+    urlHint.classList.toggle('hidden', urlRequired);
+    if (type === 'web') {
+      formHint.textContent = 'Favicon is discovered automatically from the target URL when you save.';
+    } else {
+      formHint.textContent = 'Use this to catalog services, APIs, databases, and other infrastructure.';
+    }
+  }
+
+  typeSelect.addEventListener('change', updateUrlField);
+  updateUrlField();
+})();
+</script>
 {% endblock %}

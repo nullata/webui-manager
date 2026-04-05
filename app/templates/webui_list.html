@@ -3,103 +3,183 @@
 {% block content %}
 <div class="flex flex-wrap gap-3 items-center justify-between mb-6">
   <div>
-    <h1 class="font-display text-3xl text-cyan-200">Dashboard</h1>
-    <p class="text-slate-300 text-sm">Manage UI endpoints, hosts, categories, and optional credentials.</p>
+    <h1 class="font-display text-3xl text-white">Dashboard</h1>
+    <p class="text-slate-300 text-sm">Manage UI endpoints, hosts, categories, optional credentials, and availability
+      checks.</p>
   </div>
-  <a href="{{ url_for('main.new_webui') }}" class="rounded-lg bg-cyan-500 px-4 py-2 text-slate-950 font-semibold hover:bg-cyan-400 transition">
-    <i class="fa-solid fa-plus mr-1"></i>Add WebUI
+  <a href="{{ url_for('main.new_webui') }}"
+    class="rounded-lg bg-white px-4 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
+    <i class="fa-solid fa-plus mr-1"></i>Add Service
   </a>
 </div>
 
 <form method="get" class="grid sm:grid-cols-4 gap-3 rounded-xl border border-slate-800 bg-panel/60 p-4 mb-6">
-  <input name="q" value="{{ q }}" placeholder="Search name, url, description..." class="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40" />
-  <select name="host_id" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">
+  <input name="q" value="{{ q }}" placeholder="Search name, url, description..."
+    class="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+  <select name="host_id"
+    class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25">
     <option value="">All hosts</option>
     {% for host in hosts %}
-      <option value="{{ host.id }}" {% if host.id == host_id %}selected{% endif %}>{{ host.name }}</option>
+    <option value="{{ host.id }}" {% if host.id==host_id %}selected{% endif %}>{{ host.name }}</option>
     {% endfor %}
   </select>
-  <select name="category_id" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-500/40">
+  <select name="category_id"
+    class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25">
     <option value="">All categories</option>
     {% for category in categories %}
-      <option value="{{ category.id }}" {% if category.id == category_id %}selected{% endif %}>{{ category.name }}</option>
+    <option value="{{ category.id }}" {% if category.id==category_id %}selected{% endif %}>{{ category.name }}</option>
     {% endfor %}
   </select>
   <div class="sm:col-span-4 flex gap-2">
-    <button class="rounded-lg border border-cyan-700 text-cyan-200 px-4 py-2 hover:bg-cyan-900/30 transition" type="submit">
+    <button class="rounded-lg border border-slate-600 text-white px-4 py-2 hover:bg-white/10 transition"
+      type="submit">
       <i class="fa-solid fa-magnifying-glass mr-1"></i>Search
     </button>
-    <a href="{{ url_for('main.webui_list') }}" class="rounded-lg border border-slate-700 px-4 py-2 hover:bg-slate-800 transition">Reset</a>
+    <a href="{{ url_for('main.webui_list') }}"
+      class="rounded-lg border border-slate-700 px-4 py-2 hover:bg-slate-800 transition">Reset</a>
   </div>
 </form>
 
 {% if groups %}
-  {% for host_name, items in groups %}
-  <div class="mb-8">
-    <h2 class="font-display text-lg text-slate-400 mb-3 flex items-center gap-2">
-      {% if host_name %}
-        <i class="fa-solid fa-server text-cyan-600 text-sm"></i>{{ host_name }}
-      {% else %}
-        <i class="fa-solid fa-circle-question text-slate-600 text-sm"></i>Unassigned
-      {% endif %}
-    </h2>
-    <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-      {% for item in items %}
-      <article class="flex flex-col min-h-44 rounded-xl border border-slate-800 bg-panel/70 p-4 shadow-neon">
-        <div class="flex justify-between gap-3">
-          <div class="flex gap-3">
-            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="h-10 w-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 hover:border-cyan-600 transition">
+{% for host_name, items in groups %}
+<div class="mb-8">
+  <h2 class="font-display text-lg text-slate-400 mb-3 flex items-center gap-2">
+    {% if host_name %}
+    <i class="fa-solid fa-server text-slate-500 text-sm"></i>{{ host_name }}
+    {% else %}
+    <i class="fa-solid fa-circle-question text-slate-600 text-sm"></i>Unassigned
+    {% endif %}
+  </h2>
+  <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+    {% for item in items %}
+    <article class="flex flex-col min-h-44 rounded-xl border border-slate-800 bg-panel/70 p-4 shadow-neon">
+      <div class="flex justify-between gap-3">
+        <div class="flex gap-3">
+          <div class="relative shrink-0">
+            {% if item.last_healthcheck_at %}
+            {% if item.last_healthcheck_ok is sameas true %}
+            <span
+              class="absolute -left-1 -top-1 z-10 h-3.5 w-3.5 rounded-full border border-slate-950 bg-emerald-400 dot-online"
+              title="Online -{{ item.last_healthcheck_status }} at {{ item.last_healthcheck_at.strftime('%Y-%m-%d %H:%M UTC') }}"></span>
+            {% else %}
+            <span
+              class="absolute -left-1 -top-1 z-10 h-3.5 w-3.5 rounded-full border border-slate-950 bg-orange-400 dot-offline"
+              title="Unreachable -{{ item.last_healthcheck_status }} at {{ item.last_healthcheck_at.strftime('%Y-%m-%d %H:%M UTC') }}"></span>
+            {% endif %}
+            {% endif %}
+            {% if item.url %}
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+              class="h-10 w-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden hover:border-slate-500 transition">
               {% if item.favicon_url %}
-                <img src="{{ item.favicon_url }}" alt="icon" class="h-full w-full object-cover" data-fallback />
+              <img src="{{ item.favicon_url }}" alt="icon" class="h-full w-full object-cover" loading="lazy"
+                data-fallback />
               {% else %}
-                <i class="fa-solid fa-globe text-cyan-300"></i>
+              <i class="fa-solid fa-globe text-slate-400"></i>
               {% endif %}
             </a>
-            <div>
-              <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="font-display text-xl leading-tight hover:text-cyan-300 transition">{{ item.name }}</a>
-              <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="text-cyan-300 text-sm break-all hover:text-cyan-200 block">
-                {{ item.url }} <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
-              </a>
+            {% else %}
+            <div class="h-10 w-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
+              <i class="fa-solid fa-code text-slate-400"></i>
             </div>
+            {% endif %}
           </div>
-          <div class="flex items-start gap-2">
-            <a href="{{ url_for('main.edit_webui', webui_id=item.id) }}" class="inline-flex items-center text-xs rounded-md px-2 py-1 border border-transparent bg-slate-800 hover:bg-slate-700">Edit</a>
-            <button class="inline-flex items-center text-xs rounded-md px-2 py-1 bg-rose-900/40 border border-rose-800 hover:bg-rose-800/40 delete-btn" data-url="{{ url_for('main.delete_webui', webui_id=item.id) }}" data-confirm="Delete this WebUI?">Delete</button>
+          <div>
+            {% if item.url %}
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+              class="font-display text-xl leading-tight hover:text-white transition">{{ item.name }}</a>
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+              class="text-slate-400 text-sm break-all hover:text-white block">
+              {{ item.url }} <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
+            </a>
+            {% else %}
+            <p class="font-display text-xl leading-tight">{{ item.name }}</p>
+            <p class="text-slate-500 text-sm">No URL</p>
+            {% endif %}
           </div>
         </div>
+        <div class="flex items-center gap-2">
+          <a href="{{ url_for('main.edit_webui', webui_id=item.id) }}"
+            class="inline-flex items-center text-xs rounded-md px-2 py-1 border border-transparent bg-slate-800 hover:bg-slate-700">Edit</a>
+          <button
+            class="inline-flex items-center text-xs rounded-md px-2 py-1 bg-rose-900/40 border border-rose-800 hover:bg-rose-800/40 delete-btn"
+            data-url="{{ url_for('main.delete_webui', webui_id=item.id) }}"
+            data-confirm="Delete this service?">Delete</button>
+        </div>
+      </div>
 
-        <p class="text-sm text-slate-300 mt-3 min-h-[1.25rem]">{{ item.description or '' }}</p>
+      <div class="flex flex-wrap gap-2 items-center mt-3 min-h-[1.75rem] text-xs">
+        {% if item.service_type == 'api' %}
+        <span class="px-2 py-1 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-200"><i class="fa-solid fa-code mr-1"></i>API</span>
+        {% endif %}
+        {% for category in item.categories %}
+        <span class="px-2 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-100">{{ category.name }}</span>
+        {% endfor %}
+      </div>
 
-        <div class="flex flex-wrap gap-2 mt-auto pt-3 text-xs min-h-[1.75rem] items-center">
-          {% for category in item.categories %}
-            <span class="px-2 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-100">{{ category.name }}</span>
-          {% endfor %}
+      <p class="text-sm text-slate-300 mt-2 min-h-[1.25rem]">{{ item.description or '' }}</p>
+
+      <div class="mt-auto pt-3 text-xs">
+        <div class="flex flex-wrap gap-2 items-center min-h-[1.75rem]">
+          <button
+            class="px-2 py-1 rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition history-btn"
+            data-url="{{ url_for('main.webui_history', webui_id=item.id) }}" data-name="{{ item.name }}">
+            <i class="fa-solid fa-chart-simple mr-1"></i>History
+          </button>
           {% if item.credential_username or item.credential_password_encrypted %}
-            <button class="px-2 py-1 rounded-full bg-amber-950/60 border border-amber-700 text-amber-200 hover:bg-amber-900/60 transition credentials-btn" data-url="{{ url_for('main.webui_credentials', webui_id=item.id) }}">
-              <i class="fa-solid fa-key mr-1"></i>Show credentials
-            </button>
+          <button
+            class="px-2 py-1 rounded-full bg-amber-950/60 border border-amber-700 text-amber-200 hover:bg-amber-900/60 transition credentials-btn"
+            data-url="{{ url_for('main.webui_credentials', webui_id=item.id) }}">
+            <i class="fa-solid fa-key mr-1"></i>Show credentials
+          </button>
           {% endif %}
         </div>
-        <div class="credentials-panel hidden mt-3 rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="text-slate-400 w-16 shrink-0">Username</span>
-            <span class="credentials-username font-mono text-slate-200 select-all"></span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-slate-400 w-16 shrink-0">Password</span>
-            <span class="credentials-password font-mono text-slate-200 select-all"></span>
-            <button class="ml-auto text-slate-400 hover:text-slate-200 toggle-password-btn"><i class="fa-solid fa-eye"></i></button>
-          </div>
+      </div>
+      <div
+        class="credentials-panel hidden mt-3 rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs space-y-1">
+        <div class="flex items-center gap-2">
+          <span class="text-slate-400 w-16 shrink-0">Username</span>
+          <span class="credentials-username font-mono text-slate-200 select-all"></span>
         </div>
-      </article>
-      {% endfor %}
-    </div>
+        <div class="flex items-center gap-2">
+          <span class="text-slate-400 w-16 shrink-0">Password</span>
+          <span class="credentials-password font-mono text-slate-200 select-all"></span>
+          <button class="ml-auto text-slate-400 hover:text-slate-200 toggle-password-btn"><i
+              class="fa-solid fa-eye"></i></button>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
   </div>
-  {% endfor %}
+</div>
+{% endfor %}
 {% else %}
 <div class="rounded-xl border border-dashed border-slate-700 bg-panel/50 p-10 text-center text-slate-300">
-  <i class="fa-solid fa-folder-open text-2xl mb-2 text-cyan-300"></i>
-  <p>No WebUIs found for the current filters.</p>
+  <i class="fa-solid fa-folder-open text-2xl mb-2 text-slate-400"></i>
+  <p>No services found for the current filters.</p>
 </div>
 {% endif %}
+
+<div id="history-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/60">
+  <div class="rounded-xl border border-slate-700 bg-slate-900 p-6 max-w-2xl w-full mx-4 shadow-neon">
+    <div class="flex justify-between items-center mb-4">
+      <p id="history-modal-title" class="font-display text-lg text-ink"></p>
+      <button id="history-modal-close" class="text-slate-400 hover:text-slate-200 transition"><i
+          class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">Last 24 hours, most recent first</p>
+    <div class="max-h-96 overflow-y-auto rounded-lg border border-slate-800">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-800 text-slate-400 text-xs">
+            <th class="text-left px-3 py-2 font-normal">Timestamp (UTC)</th>
+            <th class="text-left px-3 py-2 font-normal">Status</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+    <p id="history-empty" class="hidden text-sm text-slate-400 text-center py-4">No check data for the last 24 hours.
+    </p>
+  </div>
+</div>
 {% endblock %}

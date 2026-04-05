@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+function csrfHeaders() {
+  const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+  return { 'X-CSRFToken': token };
+}
+
 function showModal(id) {
   const m = document.getElementById(id);
   m.classList.remove('hidden');
@@ -43,13 +48,32 @@ function confirmModal(message) {
   });
 }
 
+function syncToggleState(toggle, input) {
+  const checked = !!input.checked;
+  toggle.dataset.checked = checked ? 'true' : 'false';
+  toggle.setAttribute('aria-checked', checked ? 'true' : 'false');
+}
+
+function dismissToast(toast) {
+  toast.classList.add('toast-dismissed');
+  setTimeout(() => toast.remove(), 300);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.toast').forEach(toast => {
+    const timer = setTimeout(() => dismissToast(toast), 4500);
+    toast.querySelector('.toast-close').addEventListener('click', () => {
+      clearTimeout(timer);
+      dismissToast(toast);
+    });
+  });
+
   document.getElementById('error-modal-dismiss').addEventListener('click', () => hideModal('error-modal'));
 
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
-      fetch(logoutBtn.dataset.url, { method: 'POST' })
+      fetch(logoutBtn.dataset.url, { method: 'POST', headers: csrfHeaders() })
         .then(() => { location.href = logoutBtn.dataset.redirect; });
     });
   }
@@ -62,10 +86,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  document.querySelectorAll('[data-toggle-control]').forEach(toggle => {
+    const input = document.getElementById(toggle.dataset.toggleInput);
+    if (!input) return;
+
+    syncToggleState(toggle, input);
+
+    toggle.addEventListener('click', () => {
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      syncToggleState(toggle, input);
+    });
+
+    input.addEventListener('change', () => {
+      syncToggleState(toggle, input);
+    });
+  });
+
   document.querySelectorAll('button.delete-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!await confirmModal(btn.dataset.confirm)) return;
-      fetch(btn.dataset.url, { method: 'POST' }).then(r => {
+      fetch(btn.dataset.url, { method: 'POST', headers: csrfHeaders() }).then(r => {
         if (r.ok) {
           location.reload();
         } else {
@@ -77,6 +118,69 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   });
+
+  const testEmailBtn = document.getElementById('test-email-btn');
+  if (testEmailBtn) {
+    testEmailBtn.addEventListener('click', () => {
+      const status = document.getElementById('test-email-status');
+      testEmailBtn.disabled = true;
+      status.textContent = 'Sending...';
+      status.style.color = '';
+      fetch(testEmailBtn.dataset.url, { method: 'POST', headers: csrfHeaders() })
+        .then(r => r.json())
+        .then(data => {
+          status.textContent = data.ok ? 'Sent successfully!' : (data.error || 'Failed to send.');
+          status.className = data.ok ? 'status-ok' : 'status-fail';
+        })
+        .catch(() => {
+          status.textContent = 'Request failed.';
+          status.className = 'status-fail';
+        })
+        .finally(() => { testEmailBtn.disabled = false; });
+    });
+  }
+
+  document.querySelectorAll('button.history-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('history-modal-title').textContent = btn.dataset.name + ' -Last 24h';
+      showModal('history-modal');
+
+      const tbody = document.getElementById('history-tbody');
+      const empty = document.getElementById('history-empty');
+      tbody.innerHTML = '';
+      empty.classList.add('hidden');
+
+      fetch(btn.dataset.url)
+        .then(r => r.json())
+        .then(logs => {
+          if (!logs.length) {
+            empty.classList.remove('hidden');
+            return;
+          }
+
+          [...logs].reverse().forEach((log, i) => {
+            const ts = new Date(log.checked_at).toISOString().replace('T', ' ').slice(0, 19);
+            const isOk = log.is_ok;
+            const tr = document.createElement('tr');
+            tr.className = i % 2 === 0 ? '' : 'history-row-alt';
+            tr.innerHTML = `
+              <td class="px-3 py-2 font-mono text-xs text-slate-300">${ts}</td>
+              <td class="px-3 py-2">
+                <span class="history-status">
+                  <span class="history-dot ${isOk ? 'history-dot-ok' : 'history-dot-fail'}"></span>
+                  <span class="${isOk ? 'history-text-ok' : 'history-text-fail'}">${isOk ? 'Online' : 'Offline'} - ${log.status_text}</span>
+                </span>
+              </td>`;
+            tbody.appendChild(tr);
+          });
+        });
+    });
+  });
+
+  const historyClose = document.getElementById('history-modal-close');
+  if (historyClose) {
+    historyClose.addEventListener('click', () => hideModal('history-modal'));
+  }
 
   document.querySelectorAll('button.edit-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -105,16 +209,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const passwordEl = panel.querySelector('.credentials-password');
     const toggleBtn = panel.querySelector('.toggle-password-btn');
     let loaded = false;
+    let plainPassword = '';
 
     btn.addEventListener('click', () => {
       if (panel.classList.contains('hidden')) {
         if (!loaded) {
-          fetch(btn.dataset.url)
+          fetch(btn.dataset.url, { method: 'POST', headers: csrfHeaders() })
             .then(r => r.json())
             .then(data => {
               usernameEl.textContent = data.username || '-';
-              passwordEl.textContent = data.password || '-';
-              passwordEl.dataset.value = data.password || '';
+              plainPassword = data.password || '';
               passwordEl.textContent = '••••••••';
               loaded = true;
             });
@@ -129,7 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     toggleBtn.addEventListener('click', () => {
       const isHidden = passwordEl.textContent === '••••••••';
-      passwordEl.textContent = isHidden ? passwordEl.dataset.value || '-' : '••••••••';
+      passwordEl.textContent = isHidden ? plainPassword || '-' : '••••••••';
       toggleBtn.innerHTML = isHidden
         ? '<i class="fa-solid fa-eye-slash"></i>'
         : '<i class="fa-solid fa-eye"></i>';

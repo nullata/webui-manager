@@ -16,7 +16,7 @@ from flask import current_app
 import base64
 import hashlib
 from html.parser import HTMLParser
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse, urljoin
 
 import requests
@@ -42,6 +42,19 @@ class _IconParser(HTMLParser):
         href = attrs_dict.get("href")
         if href and "icon" in rel_value:
             self.hrefs.append(href)
+
+
+def run_with_app_context(app, fn: Callable, error_msg: str) -> None:
+    # standard wrapper for background threads: app context + rollback/cleanup on failure
+    from .models import db
+    with app.app_context():
+        try:
+            fn()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception(error_msg)
+        finally:
+            db.session.remove()
 
 
 def normalize_url(raw_url: str) -> str:
@@ -87,30 +100,53 @@ def decrypt_secret(secret: Optional[str]) -> Optional[str]:
         return None
 
 
-def _validate_image(candidate_url: str, timeout: int = 4) -> bool:
-    # try head first since it's cheaper, fall back to get if that fails
-    try:
-        head = requests.head(candidate_url, timeout=timeout,
-                             allow_redirects=True, verify=False)
-        if head.status_code < 400:
-            content_type = (head.headers.get("content-type") or "").lower()
-            return "image" in content_type or candidate_url.lower().endswith(
-                (".ico", ".png", ".jpg", ".jpeg", ".svg", ".webp")
-            )
-    except requests.RequestException:
-        pass
+_IMAGE_EXTENSIONS = (".ico", ".png", ".jpg", ".jpeg", ".svg", ".webp")
+_CONTENT_TYPE_MAP = {
+    "ico": "image/x-icon",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "svg": "image/svg+xml",
+    "webp": "image/webp",
+}
+_MAX_FAVICON_BYTES = 100 * 1024  # 100 KB cap - favicons are tiny
 
+
+def _fetch_favicon_data_uri(candidate_url: str, timeout: int = 4) -> Optional[str]:
+    # downloads the image and returns a base64 data URI so the browser never
+    # needs to make a direct request to the service (handles self-signed certs)
     try:
-        # some servers dont respond to head - do a streaming get so we dont download the whole thing
-        get_resp = requests.get(
-            candidate_url, timeout=timeout, stream=True, verify=False)
-        content_type = (get_resp.headers.get("content-type") or "").lower()
-        return get_resp.status_code < 400 and (
-            "image" in content_type
-            or candidate_url.lower().endswith((".ico", ".png", ".jpg", ".jpeg", ".svg", ".webp"))
+        resp = requests.get(
+            candidate_url, timeout=timeout, verify=False,
+            allow_redirects=True, stream=True,
         )
+        if resp.status_code >= 400:
+            return None
+
+        content_type = (resp.headers.get("content-type") or "").lower().split(";")[0].strip()
+        ext = candidate_url.lower().rsplit(".", 1)[-1] if "." in candidate_url else ""
+
+        is_image = "image" in content_type or candidate_url.lower().endswith(_IMAGE_EXTENSIONS)
+        if not is_image:
+            return None
+
+        data = b""
+        for chunk in resp.iter_content(8192):
+            data += chunk
+            if len(data) > _MAX_FAVICON_BYTES:
+                return None
+
+        if not data:
+            return None
+
+        # normalise content-type - some servers return generic octet-stream for .ico
+        if not content_type.startswith("image/"):
+            content_type = _CONTENT_TYPE_MAP.get(ext, "image/x-icon")
+
+        encoded = base64.b64encode(data).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
     except requests.RequestException:
-        return False
+        return None
 
 
 def resolve_favicon(site_url: str, timeout: int = 4) -> Optional[str]:
@@ -155,7 +191,8 @@ def resolve_favicon(site_url: str, timeout: int = 4) -> Optional[str]:
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        if _validate_image(candidate, timeout=timeout):
-            return candidate
+        data_uri = _fetch_favicon_data_uri(candidate, timeout=timeout)
+        if data_uri:
+            return data_uri
 
     return None

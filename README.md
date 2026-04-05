@@ -7,11 +7,25 @@ A self-hosted Flask app for organizing and launching your internal web services.
 ## Features
 
 - Session-based login with first-run admin bootstrap
+- Admin password change from the Settings page
+- Login lockout after 5 failed attempts (5-minute cooldown, resets on restart)
+- CSRF protection on all forms and AJAX requests
 - Dashboard grouped by host with favicon auto-discovery
+- Optional background health checks with per-app healthcheck endpoints
 - Full-text search across name, URL, description, host, and category
 - Filter by host or category
 - Optional stored credentials (AES-encrypted at rest)
+- Background image upload with MIME type validation and 10 MB size limit
 - MySQL/MariaDB backend with automatic schema creation on first request
+
+## Service Types
+
+Each entry has a service type that controls how the dashboard renders it.
+
+| Type | URL required | Favicon | Description |
+|---|---|---|---|
+| **Web UI** | Yes | Auto-discovered | A browser-accessible interface - Grafana, Portainer, Jellyfin, etc. |
+| **API** | Yes | None | An HTTP API or backend service - REST APIs, internal endpoints, etc. |
 
 ## Requirements
 
@@ -184,6 +198,20 @@ docker run -d \
 ### First run
 
 Once the container is running, navigate to `http://localhost:5000` (or your configured port). Tables are created automatically on the first request - follow the on-screen admin setup prompt.
+
+## Upgrading from v0.6.4
+
+Schema changes between versions are provided as plain SQL scripts in the `migrations/` directory. Run the relevant script against your database before (or immediately after) restarting the updated app.
+
+| Script | What it does |
+|---|---|
+| `migrations/add_service_type.sql` | Adds the `service_type` column and makes `url` nullable - required for deployments predating service-type support |
+
+```bash
+mysql -u <user> -p <database> < migrations/add_service_type.sql
+```
+
+Fresh installs don't need to run any migration scripts - `db.create_all()` handles the full schema on first start.
 
 ## Third-Party Licenses
 

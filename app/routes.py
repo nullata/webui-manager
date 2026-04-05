@@ -12,17 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from flask import Blueprint, flash, g, redirect, render_template, request, url_for, jsonify
+import os
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
+
+from werkzeug.utils import secure_filename
+
+_ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"}
+_MAX_BG_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# magic byte signatures for each allowed image type
+_IMAGE_MAGIC: list[tuple[int, bytes]] = [
+    (0, b"\xff\xd8\xff"),           # JPEG
+    (0, b"\x89PNG\r\n\x1a\n"),      # PNG
+    (0, b"GIF87a"),                 # GIF87a
+    (0, b"GIF89a"),                 # GIF89a
+    (8, b"WEBP"),                   # WebP (RIFF....WEBP)
+    (4, b"ftyp"),                   # AVIF / HEIF (ISO base media)
+]
+
+
+def _is_valid_image(stream) -> bool:
+    header = stream.read(12)
+    stream.seek(0)
+    return any(header[offset:offset + len(sig)] == sig for offset, sig in _IMAGE_MAGIC)
+
+
+def _uploads_dir() -> str:
+    from flask import current_app
+    path = os.path.join(current_app.static_folder, "uploads")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+from flask import Blueprint, current_app, flash, g, redirect, render_template, request, url_for, jsonify
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from .auth import login_required
-from .models import Category, Host, User, WebUI, db
-from .utils import decrypt_secret, encrypt_secret, normalize_url, resolve_favicon
+from .favicons import trigger_favicon_refresh_async
+from .healthchecks import get_app_settings, notify_settings_changed, trigger_healthcheck_pass_async
+from .models import Category, HealthCheckLog, Host, User, WebUI, db
+
+_SERVICE_TYPE_LABELS = {
+    "web": "Web UI",
+    "api": "API",
+}
+from .utils import decrypt_secret, encrypt_secret, normalize_url
 
 
 main_bp = Blueprint("main", __name__)
+
+
+@main_bp.before_request
+def _load_settings() -> None:
+    g.app_settings = get_app_settings()
 
 
 @main_bp.route("/")
@@ -38,6 +82,7 @@ def index():
 @main_bp.route("/dashboard")
 @login_required
 def webui_list():
+    settings = g.app_settings
     q = (request.args.get("q") or "").strip()
     host_id = request.args.get("host_id", type=int)
     category_id = request.args.get("category_id", type=int)
@@ -102,6 +147,7 @@ def webui_list():
         q=q,
         host_id=host_id,
         category_id=category_id,
+        healthchecks_enabled=settings.healthchecks_enabled,
     )
 
 
@@ -122,13 +168,37 @@ def _form_selection_defaults(webui: WebUI | None):
 def _hydrate_webui(webui: WebUI) -> bool:
     # fill in all fields from the submitted form - shared between create and edit
     name = (request.form.get("name") or "").strip()
-    raw_url = request.form.get("url") or ""
-    url = normalize_url(raw_url)
+    raw_url = (request.form.get("url") or "").strip()
+    url = normalize_url(raw_url) if raw_url else None
+    raw_healthcheck_url = (request.form.get("healthcheck_url") or "").strip()
+    healthcheck_url = raw_healthcheck_url or ''
     description = (request.form.get("description") or "").strip() or ''
 
-    if not name or not url:
-        flash("Name and URL are required.", "error")
+    service_type = (request.form.get("service_type") or "web").strip()
+    if service_type not in WebUI.SERVICE_TYPES:
+        service_type = "web"
+
+    # web and api types require a URL; database/other can omit it
+    url_required = service_type in ("web", "api")
+
+    if not name:
+        flash("Name is required.", "error")
         return False
+
+    if url_required and not url:
+        flash("URL is required for Web UI and API service types.", "error")
+        return False
+
+    if len(name) > 150:
+        flash("Name must be 150 characters or fewer.", "error")
+        return False
+
+    if healthcheck_url and not healthcheck_url.startswith("/"):
+        healthcheck_url = normalize_url(healthcheck_url)
+        parsed_healthcheck = urlparse(healthcheck_url)
+        if not parsed_healthcheck.netloc:
+            flash("Healthcheck endpoint must be a full URL or a relative path starting with /.", "error")
+            return False
 
     host_id_value = request.form.get("host_id")
     host = None
@@ -154,14 +224,20 @@ def _hydrate_webui(webui: WebUI) -> bool:
         ).all()
 
     url_changed = url != webui.url
+    healthcheck_changed = (healthcheck_url or '') != (webui.healthcheck_url or '')
+    refresh_favicon = service_type == "web" and (url_changed or not webui.favicon_url) and bool(url)
     webui.name = name
+    webui.service_type = service_type
     webui.url = url
     webui.description = description
+    webui.healthcheck_url = healthcheck_url
     webui.host = host
     webui.categories = selected_categories
+    if url_changed:
+        webui.favicon_url = None
 
     username = (request.form.get("credential_username") or "").strip() or ''
-    password = request.form.get("credential_password") or ""
+    password = (request.form.get("credential_password") or "").strip()
     clear_credentials = bool(request.form.get("clear_credentials"))
 
     if clear_credentials:
@@ -169,18 +245,35 @@ def _hydrate_webui(webui: WebUI) -> bool:
         webui.credential_username = None
         webui.credential_password_encrypted = None
     else:
+        old_username = webui.credential_username or ''
+        if username != old_username and webui.credential_password_encrypted and not password:
+            flash("Provide a new password when changing the username, or use 'Clear credentials' first.", "error")
+            return False
         webui.credential_username = username
         # only re-encrypt if a new password was actually submitted - blank means leave existing alone
         if password:
             webui.credential_password_encrypted = encrypt_secret(password)
 
-    # only re-resolve favicon if url changed or we dont have one yet
-    if url_changed or not webui.favicon_url:
-        resolved_favicon = resolve_favicon(url)
-        if resolved_favicon:
-            webui.favicon_url = resolved_favicon
+    if url_changed or healthcheck_changed:
+        webui.last_healthcheck_at = None
+        webui.last_healthcheck_ok = None
+        webui.last_healthcheck_status = None
+
+    webui._refresh_favicon = refresh_favicon
 
     return True
+
+
+def _queue_favicon_refresh(webui: WebUI) -> None:
+    if not getattr(webui, "_refresh_favicon", False):
+        return
+
+    trigger_favicon_refresh_async(
+        current_app._get_current_object(),
+        webui.id,
+        webui.url,
+    )
+    webui._refresh_favicon = False
 
 
 @main_bp.route("/webuis/new", methods=["GET", "POST"])
@@ -203,6 +296,7 @@ def new_webui():
                 db.session.rollback()
                 flash("A WebUI with that URL already exists.", "error")
             else:
+                _queue_favicon_refresh(webui)
                 flash("WebUI created.", "success")
                 return redirect(url_for("main.webui_list"))
 
@@ -213,6 +307,7 @@ def new_webui():
         categories=categories,
         selected_host_id=selected_host_id,
         selected_category_ids=selected_category_ids,
+        service_types=_SERVICE_TYPE_LABELS,
     )
 
 
@@ -236,6 +331,7 @@ def edit_webui(webui_id: int):
                 db.session.rollback()
                 flash("Could not save changes. URL may already exist.", "error")
             else:
+                _queue_favicon_refresh(webui)
                 flash("WebUI updated.", "success")
                 return redirect(url_for("main.webui_list"))
 
@@ -246,19 +342,172 @@ def edit_webui(webui_id: int):
         categories=categories,
         selected_host_id=selected_host_id,
         selected_category_ids=selected_category_ids,
+        service_types=_SERVICE_TYPE_LABELS,
     )
 
 
-@main_bp.route("/webuis/<int:webui_id>/credentials")
+@main_bp.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings_page():
+    settings = g.app_settings
+    last_run = db.session.scalar(db.select(func.max(HealthCheckLog.checked_at)))
+
+    if request.method == "POST":
+        interval_value = (request.form.get("healthcheck_interval_minutes") or "").strip()
+        enabled = bool(request.form.get("healthchecks_enabled"))
+
+        if not interval_value.isdigit():
+            flash("Healthcheck interval must be a whole number of minutes.", "error")
+            return render_template("settings.html", settings=settings, last_run=last_run)
+
+        interval_minutes = int(interval_value)
+        if interval_minutes < 1 or interval_minutes > 1440:
+            flash("Healthcheck interval must be between 1 and 1440 minutes.", "error")
+            return render_template("settings.html", settings=settings, last_run=last_run)
+
+        settings.healthchecks_enabled = enabled
+        settings.healthcheck_interval_minutes = interval_minutes
+
+        # SMTP / email settings
+        smtp_host = (request.form.get("smtp_host") or "").strip()[:255]
+        smtp_port_raw = (request.form.get("smtp_port") or "587").strip()
+        smtp_username = (request.form.get("smtp_username") or "").strip()[:255]
+        smtp_password = (request.form.get("smtp_password") or "").strip()
+        smtp_from = (request.form.get("smtp_from_address") or "").strip()[:255]
+        smtp_to = (request.form.get("smtp_to_address") or "").strip()[:255]
+        smtp_starttls = bool(request.form.get("smtp_use_starttls"))
+        email_enabled = bool(request.form.get("email_notifications_enabled"))
+
+        if not smtp_port_raw.isdigit() or not (1 <= int(smtp_port_raw) <= 65535):
+            flash("SMTP port must be a number between 1 and 65535.", "error")
+            return render_template("settings.html", settings=settings, last_run=last_run)
+
+        for addr, label in [(smtp_from, "From"), (smtp_to, "To")]:
+            if addr and "@" not in addr:
+                flash(f"{label} address doesn't look like a valid email.", "error")
+                return render_template("settings.html", settings=settings, last_run=last_run)
+
+        settings.smtp_host = smtp_host or None
+        settings.smtp_port = int(smtp_port_raw)
+        settings.smtp_username = smtp_username or None
+        settings.smtp_from_address = smtp_from or None
+        settings.smtp_to_address = smtp_to or None
+        settings.smtp_use_starttls = smtp_starttls
+        settings.email_notifications_enabled = email_enabled
+
+        if smtp_password:
+            settings.smtp_password_encrypted = encrypt_secret(smtp_password)
+
+        # background image
+        clear_bg = bool(request.form.get("clear_background"))
+        bg_file = request.files.get("background_image")
+
+        if clear_bg:
+            if settings.background_image_filename:
+                old = os.path.join(_uploads_dir(), settings.background_image_filename)
+                if os.path.exists(old):
+                    os.remove(old)
+                settings.background_image_filename = None
+        elif bg_file and bg_file.filename:
+            ext = os.path.splitext(secure_filename(bg_file.filename))[1].lower()
+            if ext not in _ALLOWED_IMAGE_EXTENSIONS:
+                flash("Background image must be JPG, PNG, WebP, GIF, or AVIF.", "error")
+                return render_template("settings.html", settings=settings, last_run=last_run)
+            bg_file.stream.seek(0, 2)
+            size = bg_file.stream.tell()
+            bg_file.stream.seek(0)
+            if size > _MAX_BG_IMAGE_BYTES:
+                flash("Background image must be 10 MB or smaller.", "error")
+                return render_template("settings.html", settings=settings, last_run=last_run)
+            if not _is_valid_image(bg_file.stream):
+                flash("File does not appear to be a valid image.", "error")
+                return render_template("settings.html", settings=settings, last_run=last_run)
+            if settings.background_image_filename:
+                old = os.path.join(_uploads_dir(), settings.background_image_filename)
+                if os.path.exists(old):
+                    os.remove(old)
+            filename = f"bg_image{ext}"
+            bg_file.save(os.path.join(_uploads_dir(), filename))
+            settings.background_image_filename = filename
+
+        db.session.commit()
+        notify_settings_changed(current_app._get_current_object())
+
+        if enabled:
+            trigger_healthcheck_pass_async(current_app._get_current_object())
+            flash("Settings updated. Health checks will refresh shortly.", "success")
+        else:
+            flash("Settings updated.", "success")
+
+        return redirect(url_for("main.settings_page"))
+
+    return render_template("settings.html", settings=settings, last_run=last_run)
+
+
+@main_bp.route("/settings/change-password", methods=["POST"])
+@login_required
+def change_password():
+    current_password = (request.form.get("current_password") or "").strip()
+    new_password = (request.form.get("new_password") or "").strip()
+    confirm_password = (request.form.get("confirm_password") or "").strip()
+
+    if not g.user.check_password(current_password):
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for("main.settings_page"))
+
+    if not new_password:
+        flash("New password is required.", "error")
+        return redirect(url_for("main.settings_page"))
+
+    if new_password != confirm_password:
+        flash("New passwords do not match.", "error")
+        return redirect(url_for("main.settings_page"))
+
+    g.user.set_password(new_password)
+    db.session.commit()
+    flash("Password updated.", "success")
+    return redirect(url_for("main.settings_page"))
+
+
+@main_bp.route("/settings/test-email", methods=["POST"])
+@login_required
+def test_email():
+    from .notifications import send_test_email
+    ok = send_test_email(g.app_settings)
+    if ok:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Failed to send. Check SMTP config and server logs."})
+
+
+@main_bp.route("/webuis/<int:webui_id>/credentials", methods=["POST"])
 @login_required
 def webui_credentials(webui_id: int):
     # returns decrypted credentials as json - called by the js reveal button on the dashboard
-
     webui = db.get_or_404(WebUI, webui_id)
     return jsonify({
         "username": webui.credential_username or "",
         "password": decrypt_secret(webui.credential_password_encrypted) or "",
     })
+
+
+@main_bp.route("/webuis/<int:webui_id>/history")
+@login_required
+def webui_history(webui_id: int):
+    db.get_or_404(WebUI, webui_id)
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    logs = db.session.scalars(
+        db.select(HealthCheckLog)
+        .where(HealthCheckLog.webui_id == webui_id, HealthCheckLog.checked_at >= since)
+        .order_by(HealthCheckLog.checked_at.asc())
+    ).all()
+    return jsonify([
+        {
+            "checked_at": log.checked_at.isoformat(),
+            "is_ok": log.is_ok,
+            "status_text": log.status_text,
+        }
+        for log in logs
+    ])
 
 
 @main_bp.route("/webuis/<int:webui_id>/delete", methods=["POST"])
@@ -271,35 +520,54 @@ def delete_webui(webui_id: int):
     return redirect(url_for("main.webui_list"))
 
 
-@main_bp.route("/hosts", methods=["GET", "POST"])
+def _apply_named_record(instance, noun: str) -> bool:
+    # shared validation + DB write for Host and Category create/edit
+    # flashes on any failure and returns False; returns True on success
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip() or ''
+
+    if not name:
+        flash(f"{noun} name is required.", "error")
+        return False
+    if len(name) > 120:
+        flash(f"{noun} name must be 120 characters or fewer.", "error")
+        return False
+
+    is_new = instance.id is None
+    instance.name = name
+    instance.description = description
+    if is_new:
+        db.session.add(instance)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash(f"{noun} name must be unique.", "error")
+        return False
+
+    flash(f"{noun} {'created' if is_new else 'updated'}.", "success")
+    return True
+
+
+@main_bp.route("/environments")
+@login_required
+def environments_page():
+    hosts = db.session.scalars(db.select(Host).order_by(Host.name.asc())).all()
+    categories = db.session.scalars(db.select(Category).order_by(Category.name.asc())).all()
+    return render_template("environments.html", hosts=hosts, categories=categories)
+
+
+@main_bp.route("/hosts", methods=["POST"])
 @login_required
 def hosts_page():
-    if request.method == "POST":
-        name = (request.form.get("name") or "").strip()
-        description = (request.form.get("description") or "").strip() or ''
-
-        if not name:
-            flash("Host name is required.", "error")
-        else:
-            host = Host(name=name, description=description)
-            db.session.add(host)
-            try:
-                db.session.commit()
-            except IntegrityError:
-                db.session.rollback()
-                flash("Host name must be unique.", "error")
-            else:
-                flash("Host created.", "success")
-                return redirect(url_for("main.hosts_page"))
-
-    hosts = db.session.scalars(db.select(Host).order_by(Host.name.asc())).all()
-    return render_template("hosts.html", hosts=hosts)
+    if _apply_named_record(Host(), "Host"):
+        return redirect(url_for("main.environments_page") + "#hosts")
+    return redirect(url_for("main.environments_page") + "#hosts")
 
 
 @main_bp.route("/hosts/<int:host_id>/delete", methods=["POST"])
 @login_required
 def delete_host(host_id: int):
-
     host = db.get_or_404(Host, host_id)
     linked_count = db.session.scalar(
         db.select(func.count()).select_from(
@@ -311,62 +579,28 @@ def delete_host(host_id: int):
     db.session.delete(host)
     db.session.commit()
     flash("Host removed.", "info")
-    return redirect(url_for("main.hosts_page"))
+    return redirect(url_for("main.environments_page") + "#hosts")
 
 
 @main_bp.route("/hosts/<int:host_id>/edit", methods=["POST"])
 @login_required
 def edit_host(host_id: int):
     host = db.get_or_404(Host, host_id)
-    name = (request.form.get("name") or "").strip()
-    description = (request.form.get("description") or "").strip() or ''
-
-    if not name:
-        flash("Host name is required.", "error")
-        return redirect(url_for("main.hosts_page"))
-
-    host.name = name
-    host.description = description
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        flash("Host name must be unique.", "error")
-    else:
-        flash("Host updated.", "success")
-    return redirect(url_for("main.hosts_page"))
+    _apply_named_record(host, "Host")
+    return redirect(url_for("main.environments_page") + "#hosts")
 
 
-@main_bp.route("/categories", methods=["GET", "POST"])
+@main_bp.route("/categories", methods=["POST"])
 @login_required
 def categories_page():
-    if request.method == "POST":
-        name = (request.form.get("name") or "").strip()
-        description = (request.form.get("description") or "").strip() or ''
-
-        if not name:
-            flash("Category name is required.", "error")
-        else:
-            category = Category(name=name, description=description)
-            db.session.add(category)
-            try:
-                db.session.commit()
-            except IntegrityError:
-                db.session.rollback()
-                flash("Category name must be unique.", "error")
-            else:
-                flash("Category created.", "success")
-                return redirect(url_for("main.categories_page"))
-
-    categories = db.session.scalars(
-        db.select(Category).order_by(Category.name.asc())).all()
-    return render_template("categories.html", categories=categories)
+    if _apply_named_record(Category(), "Category"):
+        return redirect(url_for("main.environments_page") + "#categories")
+    return redirect(url_for("main.environments_page") + "#categories")
 
 
 @main_bp.route("/categories/<int:category_id>/delete", methods=["POST"])
 @login_required
 def delete_category(category_id: int):
-
     category = db.get_or_404(Category, category_id)
     from .models import webui_categories
     linked_count = db.session.scalar(
@@ -379,27 +613,12 @@ def delete_category(category_id: int):
     db.session.delete(category)
     db.session.commit()
     flash("Category removed.", "info")
-    return redirect(url_for("main.categories_page"))
+    return redirect(url_for("main.environments_page") + "#categories")
 
 
 @main_bp.route("/categories/<int:category_id>/edit", methods=["POST"])
 @login_required
 def edit_category(category_id: int):
     category = db.get_or_404(Category, category_id)
-    name = (request.form.get("name") or "").strip()
-    description = (request.form.get("description") or "").strip() or ''
-
-    if not name:
-        flash("Category name is required.", "error")
-        return redirect(url_for("main.categories_page"))
-
-    category.name = name
-    category.description = description
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        flash("Category name must be unique.", "error")
-    else:
-        flash("Category updated.", "success")
-    return redirect(url_for("main.categories_page"))
+    _apply_named_record(category, "Category")
+    return redirect(url_for("main.environments_page") + "#categories")

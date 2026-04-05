@@ -12,13 +12,49 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from functools import wraps
+from threading import Lock
 
 from flask import Blueprint, flash, g, redirect, render_template, request, session, url_for
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from .models import User, db
+
+_MAX_ATTEMPTS = 5
+_LOCKOUT_DURATION = timedelta(minutes=5)
+
+_failure_counts: dict[str, int] = defaultdict(int)
+_lockout_until: dict[str, datetime] = {}
+_attempts_lock = Lock()
+
+
+def _client_ip() -> str:
+    return request.remote_addr or "unknown"
+
+
+def _check_lockout(ip: str) -> bool:
+    """Return True if the IP is currently locked out."""
+    until = _lockout_until.get(ip)
+    if until and datetime.now(timezone.utc) < until:
+        return True
+    return False
+
+
+def _record_failure(ip: str) -> None:
+    with _attempts_lock:
+        _failure_counts[ip] += 1
+        if _failure_counts[ip] >= _MAX_ATTEMPTS:
+            _lockout_until[ip] = datetime.now(timezone.utc) + _LOCKOUT_DURATION
+            del _failure_counts[ip]
+
+
+def _clear_failures(ip: str) -> None:
+    with _attempts_lock:
+        _failure_counts.pop(ip, None)
+        _lockout_until.pop(ip, None)
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -69,12 +105,19 @@ def login():
         return redirect(url_for("main.webui_list"))
 
     if request.method == "POST":
+        ip = _client_ip()
+
+        if _check_lockout(ip):
+            flash("Too many failed attempts. Try again in 5 minutes.", "error")
+            return render_template("login.html")
+
         username = (request.form.get("username") or "").strip()
-        password = request.form.get("password") or ""
+        password = (request.form.get("password") or "").strip()
 
         user = db.session.scalar(
             db.select(User).where(User.username == username))
         if user and user.check_password(password):
+            _clear_failures(ip)
             session.clear()
             session["user_id"] = user.id
 
@@ -84,6 +127,7 @@ def login():
                 next_url = url_for("main.webui_list")
             return redirect(next_url)
 
+        _record_failure(ip)
         flash("Invalid username or password.", "error")
 
     return render_template("login.html")
@@ -99,8 +143,8 @@ def setup_admin():
 
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
-        password = request.form.get("password") or ""
-        password_confirm = request.form.get("password_confirm") or ""
+        password = (request.form.get("password") or "").strip()
+        password_confirm = (request.form.get("password_confirm") or "").strip()
 
         if not username:
             flash("Username is required.", "error")

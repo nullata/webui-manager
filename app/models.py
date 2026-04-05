@@ -63,15 +63,46 @@ class Category(db.Model):
     description = db.Column(db.Text)
 
 
+class AppSetting(db.Model):
+    __tablename__ = "app_setting"
+
+    id = db.Column(db.Integer, primary_key=True, default=1)
+    healthchecks_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    healthcheck_interval_minutes = db.Column(
+        db.Integer, default=5, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    # SMTP / email notification settings
+    smtp_host = db.Column(db.String(255))
+    smtp_port = db.Column(db.Integer, default=587, nullable=False)
+    smtp_username = db.Column(db.String(255))
+    smtp_password_encrypted = db.Column(db.Text)
+    smtp_from_address = db.Column(db.String(255))
+    smtp_to_address = db.Column(db.String(255))
+    smtp_use_starttls = db.Column(db.Boolean, default=True, nullable=False)
+    email_notifications_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    background_image_filename = db.Column(db.String(255))
+
+
 class WebUI(db.Model):
     __tablename__ = "web_ui"
 
+    SERVICE_TYPES = ("web", "api")
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False, index=True)
+    service_type = db.Column(db.String(20), nullable=False, default="web")
     # capped at 768 chars - utf8mb4 is 4 bytes per char, 768*4 = 3072 which is the mysql index limit
-    url = db.Column(db.String(768), nullable=False, unique=True)
+    # nullable because non-web service types (database, other) may not have an HTTP URL
+    url = db.Column(db.String(768), nullable=True, unique=True)
     description = db.Column(db.Text)
-    favicon_url = db.Column(db.String(1024))
+    favicon_url = db.Column(db.Text)
+    healthcheck_url = db.Column(db.String(768))
+    last_healthcheck_at = db.Column(db.DateTime)
+    last_healthcheck_ok = db.Column(db.Boolean)
+    last_healthcheck_status = db.Column(db.String(255))
 
     host_id = db.Column(db.Integer, db.ForeignKey(
         "host.id"), nullable=True, index=True)
@@ -91,3 +122,20 @@ class WebUI(db.Model):
     # lazy=subquery loads categories in the same query to avoid n+1 on the dashboard
     categories = db.relationship(
         "Category", secondary=webui_categories, lazy="subquery")
+
+    healthcheck_logs = db.relationship(
+        "HealthCheckLog", back_populates="webui", cascade="all, delete-orphan", lazy="dynamic"
+    )
+
+
+class HealthCheckLog(db.Model):
+    __tablename__ = "healthcheck_log"
+
+    id = db.Column(db.Integer, primary_key=True)
+    webui_id = db.Column(db.Integer, db.ForeignKey(
+        "web_ui.id"), nullable=False, index=True)
+    checked_at = db.Column(db.DateTime, nullable=False, index=True)
+    is_ok = db.Column(db.Boolean, nullable=False)
+    status_text = db.Column(db.String(255), nullable=False, default="")
+
+    webui = db.relationship("WebUI", back_populates="healthcheck_logs")

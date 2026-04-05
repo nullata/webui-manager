@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Settings | WebUI Manager{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+  {% set healthchecks_checked = request.form.get('healthchecks_enabled') if request.method == 'POST' else ('1' if settings.healthchecks_enabled else '') %}
+  {% set email_checked = request.form.get('email_notifications_enabled') if request.method == 'POST' else ('1' if settings.email_notifications_enabled else '') %}
+  {% set starttls_checked = request.form.get('smtp_use_starttls') if request.method == 'POST' else ('1' if settings.smtp_use_starttls else '') %}
+
+  <h1 class="font-display text-3xl text-white mb-2">Settings</h1>
+  <p class="text-slate-300 text-sm mb-6">Configure the background availability checker and email notifications.</p>
+
+  <form method="post" enctype="multipart/form-data" class="rounded-xl border border-slate-800 bg-panel/70 p-6 space-y-5">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <!-- Health Checks -->
+    <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+      <div class="flex items-start gap-4">
+        <div class="shrink-0 pt-1">
+          <input id="healthchecks_enabled" type="checkbox" name="healthchecks_enabled" value="1"
+            {% if healthchecks_checked %}checked{% endif %} class="sr-only" />
+          <button type="button" class="settings-toggle" data-toggle-control data-toggle-input="healthchecks_enabled"
+            aria-controls="healthchecks_enabled" aria-label="Toggle periodic health checks">
+            <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+          </button>
+        </div>
+        <label for="healthchecks_enabled" class="block cursor-pointer">
+          <span class="block font-display text-lg text-slate-100">Enable periodic health checks</span>
+          <span class="block mt-1 text-sm text-slate-400">When enabled, the app runs a background worker that sends HTTP requests to each WebUI on the configured interval.</span>
+        </label>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm mb-1">Check interval (minutes)</label>
+      <input type="number" min="1" max="1440" name="healthcheck_interval_minutes"
+        value="{{ request.form.get('healthcheck_interval_minutes', settings.healthcheck_interval_minutes) }}"
+        class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+      <p class="mt-2 text-xs text-slate-400">If a WebUI has a healthcheck endpoint configured, that endpoint is used. Otherwise the checker falls back to the main app URL.</p>
+      <p class="mt-1 text-xs text-slate-500">
+        Last ran:
+        {% if last_run %}
+          {{ last_run.strftime('%Y-%m-%d %H:%M') }} UTC
+        {% else %}
+          never
+        {% endif %}
+      </p>
+    </div>
+
+    <!-- Email Notifications -->
+    <div class="border-t border-slate-800 pt-5">
+      <h2 class="font-display text-xl mb-4"><i class="fa-solid fa-envelope mr-2 text-white"></i>Email Notifications</h2>
+
+      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4 mb-4">
+        <div class="flex items-start gap-4">
+          <div class="shrink-0 pt-1">
+            <input id="email_notifications_enabled" type="checkbox" name="email_notifications_enabled" value="1"
+              {% if email_checked %}checked{% endif %} class="sr-only" />
+            <button type="button" class="settings-toggle" data-toggle-control data-toggle-input="email_notifications_enabled"
+              aria-controls="email_notifications_enabled" aria-label="Toggle email notifications">
+              <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+            </button>
+          </div>
+          <label for="email_notifications_enabled" class="block cursor-pointer">
+            <span class="block font-display text-lg text-slate-100">Enable email notifications</span>
+            <span class="block mt-1 text-sm text-slate-400">Send an email when a service transitions to DOWN. Requires SMTP to be configured below.</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm mb-1">SMTP Host</label>
+          <input name="smtp_host" value="{{ request.form.get('smtp_host', settings.smtp_host or '') }}"
+            placeholder="smtp.example.com"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">SMTP Port</label>
+          <input name="smtp_port" type="number" min="1" max="65535"
+            value="{{ request.form.get('smtp_port', settings.smtp_port or 587) }}"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Username</label>
+          <input name="smtp_username" value="{{ request.form.get('smtp_username', settings.smtp_username or '') }}"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Password
+            {% if settings.smtp_password_encrypted %}<span class="text-xs text-slate-400">(leave blank to keep existing)</span>{% endif %}
+          </label>
+          <input name="smtp_password" type="password"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">From Address</label>
+          <input name="smtp_from_address" type="email"
+            value="{{ request.form.get('smtp_from_address', settings.smtp_from_address or '') }}"
+            placeholder="alerts@example.com"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">To Address</label>
+          <input name="smtp_to_address" type="email"
+            value="{{ request.form.get('smtp_to_address', settings.smtp_to_address or '') }}"
+            placeholder="you@example.com"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4 mt-4">
+        <div class="flex items-start gap-4">
+          <div class="shrink-0 pt-1">
+            <input id="smtp_use_starttls" type="checkbox" name="smtp_use_starttls" value="1"
+              {% if starttls_checked %}checked{% endif %} class="sr-only" />
+            <button type="button" class="settings-toggle" data-toggle-control data-toggle-input="smtp_use_starttls"
+              aria-controls="smtp_use_starttls" aria-label="Toggle STARTTLS">
+              <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+            </button>
+          </div>
+          <label for="smtp_use_starttls" class="block cursor-pointer">
+            <span class="block font-display text-lg text-slate-100">Use STARTTLS</span>
+            <span class="block mt-1 text-sm text-slate-400">Upgrade the connection to TLS after connecting. Recommended for port 587. Disable for port 465 (implicit SSL) or unencrypted relays.</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center gap-3">
+        <button type="button" id="test-email-btn"
+          data-url="{{ url_for('main.test_email') }}"
+          class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 transition">
+          <i class="fa-solid fa-paper-plane mr-1"></i>Send test email
+        </button>
+        <span id="test-email-status" class="text-sm"></span>
+      </div>
+    </div>
+
+    <!-- Background Image -->
+    <div class="border-t border-slate-800 pt-5">
+      <h2 class="font-display text-xl mb-4"><i class="fa-solid fa-image mr-2 text-white"></i>Background Image</h2>
+      {% if settings.background_image_filename %}
+        <div class="bg-preview mb-3">
+          <img src="{{ url_for('static', filename='uploads/' + settings.background_image_filename) }}" alt="Current background" />
+        </div>
+        <label class="flex items-center gap-2 text-sm text-rose-200 mb-3">
+          <input type="checkbox" name="clear_background" value="1" class="rounded border-slate-600 bg-slate-800 text-rose-400" />
+          Remove background image on save
+        </label>
+      {% else %}
+        <p class="text-sm text-slate-400 mb-3">No custom background set - using the default gradient.</p>
+      {% endif %}
+      <div>
+        <label class="block text-sm mb-1">{{ 'Replace image' if settings.background_image_filename else 'Upload image' }}</label>
+        <input type="file" name="background_image" accept="image/*"
+          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-xs file:text-slate-200" />
+        <p class="mt-1 text-xs text-slate-400">JPG, PNG, WebP, GIF, or AVIF. The image will be fixed to the viewport and page content scrolls over it.</p>
+      </div>
+    </div>
+
+    <div class="flex gap-3 border-t border-slate-800 pt-5">
+      <button type="submit" class="rounded-lg bg-white px-5 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
+        <i class="fa-solid fa-floppy-disk mr-1"></i>Save Settings
+      </button>
+    </div>
+  </form>
+
+  <!-- Admin Password - separate form so it doesn't interfere with settings save -->
+  <form method="post" action="{{ url_for('main.change_password') }}"
+    class="rounded-xl border border-slate-800 bg-panel/70 p-6 mt-6 space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <h2 class="font-display text-xl"><i class="fa-solid fa-key mr-2 text-white"></i>Change Admin Password</h2>
+    <div class="grid sm:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Current Password</label>
+        <input type="password" name="current_password" autocomplete="current-password"
+          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+      </div>
+      <div>
+        <label class="block text-sm mb-1">New Password</label>
+        <input type="password" name="new_password" autocomplete="new-password"
+          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Confirm New Password</label>
+        <input type="password" name="confirm_password" autocomplete="new-password"
+          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+      </div>
+    </div>
+    <div>
+      <button type="submit" class="rounded-lg bg-white px-5 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
+        <i class="fa-solid fa-floppy-disk mr-1"></i>Update Password
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

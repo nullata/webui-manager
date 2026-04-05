@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from threading import Lock
-
-from flask import Flask, render_template, request
+from flask import Flask, render_template
+from flask_wtf.csrf import CSRFProtect
 
 from .config import Config
+from .healthchecks import start_healthcheck_worker
 from .models import db
 from .routes import main_bp
 from .auth import auth_bp, init_auth
 
-
-# lock to prevent multiple threads from running create_all at the same time on startup
-_schema_lock = Lock()
+csrf = CSRFProtect()
 
 
 def create_app() -> Flask:
@@ -31,37 +29,16 @@ def create_app() -> Flask:
     app.config.from_object(Config)
 
     db.init_app(app)
-    # flag so we only run schema creation once per process lifetime
-    app.extensions["schema_ready"] = False
+    csrf.init_app(app)
 
-    @app.before_request
-    def auto_migrate_schema() -> None:
-        # skip if auto migrate is disabled or schema is already set up
-        if not app.config.get("AUTO_MIGRATE", True):
-            return
-        # skip static file requests - no point acquiring the lock for those
-        if request.path.startswith("/static/"):
-            return
-        if app.extensions.get("schema_ready"):
-            return
-        with _schema_lock:
-            # double-check inside the lock in case another thread just finished
-            if app.extensions.get("schema_ready"):
-                return
-            db.create_all()
-            app.extensions["schema_ready"] = True
+    with app.app_context():
+        db.create_all()
 
     init_auth(app)
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
-
-    @app.cli.command("init-db")
-    def init_db() -> None:
-        # manually trigger schema creation - useful if AUTO_MIGRATE is off
-        with app.app_context():
-            db.create_all()
-        print("Database tables created.")
+    start_healthcheck_worker(app)
 
     @app.cli.command("create-admin")
     def create_admin() -> None:
@@ -69,9 +46,6 @@ def create_app() -> Flask:
         from getpass import getpass
 
         from .models import User
-
-        with app.app_context():
-            db.create_all()
 
         username = input("Username: ").strip()
         if not username:
@@ -120,6 +94,7 @@ def create_app() -> Flask:
 
     @app.errorhandler(500)
     def internal_error(e):
+        db.session.rollback()
         return render_template("error.html", error_code=500,
                                error_title="Internal Server Error",
                                error_description="Something went wrong on our end. Please try again later."), 500

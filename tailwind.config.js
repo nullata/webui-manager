@@ -12,13 +12,12 @@ module.exports = {
       },
       colors: {
         ink: "#f4f7fb",
-        panel: "#111827",
-        panelsoft: "#1f2937",
-        accent: "#22d3ee",
+        panel: "#1a1a1a",
+        panelsoft: "#242424",
         ember: "#fb7185",
       },
       boxShadow: {
-        neon: "0 0 0 1px rgba(34,211,238,.16), 0 10px 35px rgba(15,23,42,.45)",
+        neon: "0 0 0 1px rgba(255,255,255,.07), 0 10px 35px rgba(0,0,0,.5)",
       },
     },
   },
