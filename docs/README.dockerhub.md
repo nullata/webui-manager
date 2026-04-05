@@ -12,11 +12,14 @@ For full documentation and source code visit [github.com/nullata/webui-manager](
 
 ## Features
 
-- Session-based login with first-run admin bootstrap
+- Session-based login with first-run admin bootstrap and in-app password change
+- Login rate limiting (5 failed attempts triggers a 5-minute IP lockout)
 - Dashboard grouped by host with favicon auto-discovery
+- Custom background image support
 - Full-text search across name, URL, description, host, and category
 - Filter by host or category
 - Optional stored credentials (AES-encrypted at rest)
+- CSRF protection on all forms and AJAX requests
 - MySQL/MariaDB backend with automatic schema creation on first request
 
 ## Quick Start
@@ -60,6 +63,19 @@ Navigate to `http://localhost:5000` and follow the admin setup prompt.
 | `DATABASE_URL` | No | Full SQLAlchemy URL, overrides all `DB_*` fields |
 | `APP_CREDENTIALS_KEY` | No | Separate key for credential encryption (falls back to `SECRET_KEY`) |
 | `AUTO_MIGRATE` | No | Auto-create tables on first request (default: `true`) |
+
+## Upgrading
+
+### v0.7.5 - Breaking DB Schema Change
+
+v0.7.5 introduces schema changes that are **not backwards-compatible** with v0.6.4.
+
+If you are upgrading from v0.6.4 or earlier, you must either:
+
+- **Reinitialize the database** (drop and recreate) - all data will be lost, or
+- **Run the migration SQL** - see the [v0.7.5 release notes](https://github.com/nullata/webui-manager/releases/tag/0.7.5) for the required statements
+
+Fresh installs are unaffected; the schema is created automatically on first request.
 
 ## License
 
