@@ -1,4 +1,4 @@
-![webuiception](app/static/images/dank.jpg "webuiception")
+![webuimanager-logo](docs/webuimanager-logo.png)
 
 # <img src="app/static/images/logo.svg" alt="logo" width="24"> WebUI Manager
 
@@ -226,3 +226,5 @@ The UI was generated with Gemini 2.5 and refined with many manual and agentic ad
 ## License
 
 Licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
+![webuiception](app/static/images/dank.jpg "webuiception")
