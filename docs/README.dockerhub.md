@@ -1,8 +1,6 @@
-<p align="center">
-<img src="https://raw.githubusercontent.com/nullata/containers/refs/heads/main/images/logo.png" alt="Logo" width="96">
-</p>
+<p align="center"><img src="https://raw.githubusercontent.com/nullata/webui-manager/main/docs/webuimanager-logo.png" alt="logo" width="600"> </p>
 
-# WebUI Manager
+# <img src="https://raw.githubusercontent.com/nullata/containers/refs/heads/main/images/logo.png" alt="Logo" width="24"> WebUI Manager
 
 Self-hosted dashboard for organizing and launching your internal web services.
 
