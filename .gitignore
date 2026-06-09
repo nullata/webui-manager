@@ -27,6 +27,6 @@ Thumbs.db
 
 # Misc
 # *.jpg
-*.png
+# *.png
 
 tailwindcss-linux-x64
