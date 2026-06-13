@@ -13,7 +13,7 @@
   </a>
 </div>
 
-<form method="get" class="grid sm:grid-cols-4 gap-3 rounded-xl border border-slate-800 bg-panel/60 p-4 mb-6">
+<form method="get" class="search-panel grid sm:grid-cols-4 gap-3 rounded-xl border border-slate-800 bg-panel/60 p-4 mb-6">
   <input name="q" value="{{ q }}" placeholder="Search name, url, description..."
     class="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
   <select name="host_id"
@@ -42,19 +42,24 @@
 
 {% if groups %}
 {% for host_name, items in groups %}
-<div class="mb-8">
-  <h2 class="font-display text-lg text-slate-400 mb-3 flex items-center gap-2">
-    {% if host_name %}
-    <i class="fa-solid fa-server text-slate-500 text-sm"></i>{{ host_name }}
-    {% else %}
-    <i class="fa-solid fa-circle-question text-slate-600 text-sm"></i>Unassigned
-    {% endif %}
+<div class="mb-8 host-group" data-host-key="{{ host_name or '__unassigned__' }}">
+  <h2 class="mb-3">
+    <button type="button" aria-expanded="true"
+      class="host-toggle w-full flex items-center gap-2 text-left font-display text-lg text-slate-400 hover:text-slate-200 transition">
+      <i class="fa-solid fa-chevron-down host-chevron text-xs text-slate-500"></i>
+      {% if host_name %}
+      <i class="fa-solid fa-server text-slate-500 text-sm"></i>{{ host_name }}
+      {% else %}
+      <i class="fa-solid fa-circle-question text-slate-600 text-sm"></i>Unassigned
+      {% endif %}
+      <span class="ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-body text-slate-400">{{ items|length }}</span>
+    </button>
   </h2>
-  <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+  <div class="host-cards grid items-start md:grid-cols-2 xl:grid-cols-3 gap-4">
     {% for item in items %}
-    <article class="flex flex-col min-h-44 rounded-xl border border-slate-800 bg-panel/70 p-4 shadow-neon">
+    <article class="service-card flex flex-col rounded-xl border border-slate-800 p-4">
       <div class="flex justify-between gap-3">
-        <div class="flex gap-3">
+        <div class="flex gap-3 min-w-0">
           <div class="relative shrink-0">
             {% if item.last_healthcheck_at %}
             {% if item.last_healthcheck_ok is sameas true %}
@@ -83,21 +88,22 @@
             </div>
             {% endif %}
           </div>
-          <div>
+          <div class="min-w-0">
             {% if item.url %}
-            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
-              class="font-display text-xl leading-tight hover:text-white transition">{{ item.name }}</a>
-            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
-              class="text-slate-400 text-sm break-all hover:text-white block">
-              {{ item.url }} <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" title="{{ item.name }}"
+              class="block truncate font-display text-xl leading-tight hover:text-white transition">{{ item.name }}</a>
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" title="{{ item.url }}"
+              class="flex items-center gap-1 text-slate-400 text-sm hover:text-white">
+              <span class="truncate min-w-0">{{ item.url }}</span>
+              <i class="fa-solid fa-arrow-up-right-from-square text-xs shrink-0"></i>
             </a>
             {% else %}
-            <p class="font-display text-xl leading-tight">{{ item.name }}</p>
+            <p class="truncate font-display text-xl leading-tight" title="{{ item.name }}">{{ item.name }}</p>
             <p class="text-slate-500 text-sm">No URL</p>
             {% endif %}
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="service-card__actions flex items-center gap-2 shrink-0">
           <a href="{{ url_for('main.edit_webui', webui_id=item.id) }}"
             class="inline-flex items-center text-xs rounded-md px-2 py-1 border border-transparent bg-slate-800 hover:bg-slate-700">Edit</a>
           <button
@@ -106,6 +112,9 @@
             data-confirm="Delete this service?">Delete</button>
         </div>
       </div>
+
+      <div class="service-card__reveal">
+        <div class="service-card__reveal-inner">
 
       <div class="flex flex-wrap gap-2 items-center mt-3 min-h-[1.75rem] text-xs">
         {% if item.service_type == 'api' %}
@@ -145,6 +154,8 @@
           <span class="credentials-password font-mono text-slate-200 select-all"></span>
           <button class="ml-auto text-slate-400 hover:text-slate-200 toggle-password-btn"><i
               class="fa-solid fa-eye"></i></button>
+        </div>
+      </div>
         </div>
       </div>
     </article>

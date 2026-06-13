@@ -70,6 +70,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('error-modal-dismiss').addEventListener('click', () => hideModal('error-modal'));
 
+  const scrollTopBtn = document.getElementById('scroll-top-btn');
+  if (scrollTopBtn) {
+    const toggleScrollTop = () => scrollTopBtn.classList.toggle('is-visible', window.scrollY > 300);
+    toggleScrollTop();
+    window.addEventListener('scroll', toggleScrollTop, { passive: true });
+    scrollTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  }
+
+  document.querySelectorAll('.host-toggle').forEach(btn => {
+    const group = btn.closest('.host-group');
+    const storageKey = 'host-collapsed:' + group.dataset.hostKey;
+
+    const setCollapsed = (collapsed, persist) => {
+      group.classList.toggle('is-collapsed', collapsed);
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      if (persist) {
+        try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+      }
+    };
+
+    let stored = null;
+    try { stored = localStorage.getItem(storageKey); } catch (e) { /* ignore */ }
+    if (stored === '1') setCollapsed(true, false);
+
+    btn.addEventListener('click', () => setCollapsed(!group.classList.contains('is-collapsed'), true));
+  });
+
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {

@@ -32,20 +32,34 @@ body {
   background-color: #0f0f0f;
 }
 
-/* Replace blue-tinted panel and slate backgrounds with neutral graphite */
-.bg-panel\/50  { background-color: rgba(26,26,26,.50) !important; }
-.bg-panel\/60  { background-color: rgba(26,26,26,.60) !important; }
-.bg-panel\/70  { background-color: rgba(26,26,26,.70) !important; }
-.bg-panel\/85  { background-color: rgba(26,26,26,.85) !important; }
+/* Shared acrylic / frosted backdrop for translucent surfaces */
+:root {
+  --acrylic-blur: blur(14px) saturate(135%);
+}
+
+.acrylic {
+  backdrop-filter: var(--acrylic-blur);
+  -webkit-backdrop-filter: var(--acrylic-blur);
+}
+
+/* Replace blue-tinted panel and slate backgrounds with neutral graphite.
+   Translucent surfaces get an acrylic backdrop blur and a slight opacity bump. */
+.bg-panel\/50  { background-color: rgba(26,26,26,.60) !important; backdrop-filter: var(--acrylic-blur); -webkit-backdrop-filter: var(--acrylic-blur); }
+.bg-panel\/60  { background-color: rgba(26,26,26,.70) !important; backdrop-filter: var(--acrylic-blur); -webkit-backdrop-filter: var(--acrylic-blur); }
+.bg-panel\/70  { background-color: rgba(26,26,26,.80) !important; backdrop-filter: var(--acrylic-blur); -webkit-backdrop-filter: var(--acrylic-blur); }
+.bg-panel\/85  { background-color: rgba(26,26,26,.92) !important; backdrop-filter: var(--acrylic-blur); -webkit-backdrop-filter: var(--acrylic-blur); }
 .shadow-neon   { --tw-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 10px 35px rgba(0,0,0,.5) !important; box-shadow: var(--tw-ring-offset-shadow,0 0 #0000), var(--tw-ring-shadow,0 0 #0000), var(--tw-shadow) !important; }
 .bg-slate-950  { background-color: #0f0f0f !important; }
 .bg-slate-900  { background-color: #1c1c1c !important; }
 .bg-slate-800  { background-color: #2a2a2a !important; }
 
-.bg-slate-950\/40 { background-color: rgba(15,15,15,.40) !important; }
-.bg-slate-950\/80 { background-color: rgba(15,15,15,.80) !important; }
-.bg-slate-900\/55 { background-color: rgba(28,28,28,.55) !important; }
+.bg-slate-950\/40 { background-color: rgba(15,15,15,.55) !important; backdrop-filter: var(--acrylic-blur); -webkit-backdrop-filter: var(--acrylic-blur); }
+.bg-slate-950\/80 { background-color: rgba(15,15,15,.86) !important; }
+.bg-slate-900\/55 { background-color: rgba(28,28,28,.66) !important; backdrop-filter: var(--acrylic-blur); -webkit-backdrop-filter: var(--acrylic-blur); }
 .bg-slate-800\/90 { background-color: rgba(42,42,42,.90) !important; }
+
+/* Frosted dim behind modal overlays */
+.bg-black\/60 { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
 
 img {
   image-rendering: auto;
@@ -141,6 +155,177 @@ img {
 
 .dot-online  { animation: dot-pulse-green  2s ease-out infinite; }
 .dot-offline { animation: dot-pulse-orange 2s ease-out infinite; }
+
+/* Dashboard service cards: compact by default, expand on hover.
+   The detail panel is absolutely positioned so an expanded card overlaps the
+   cards below it (raised z-index) instead of pushing the whole grid row down.
+   The expansion is held back until --card-expand-delay after hover starts. */
+:root {
+  --card-bg-active: #1d1d1d;
+  --card-border-active: rgba(255, 255, 255, 0.18);
+  --card-radius: 0.75rem;       /* matches Tailwind rounded-xl */
+  --card-expand-delay: 0.6s;    /* wait before the panel drops open */
+}
+
+.service-card {
+  position: relative;
+  background-color: rgba(26, 26, 26, 0.66);
+  backdrop-filter: var(--acrylic-blur);
+  -webkit-backdrop-filter: var(--acrylic-blur);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease, transform 0.2s ease, border-radius 0.15s ease;
+}
+
+/* Active card: opaque, lifted, raised above neighbours. Bottom corners square
+   in sync with the panel so the two read as one continuous card. */
+.service-card:hover,
+.service-card:focus-within {
+  background-color: var(--card-bg-active);
+  border-color: var(--card-border-active);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  transform: translateY(-2px);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  z-index: 20;
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease, transform 0.2s ease,
+    border-radius 0.15s ease var(--card-expand-delay);
+}
+
+/* Edit / delete actions reveal together with the panel */
+.service-card__actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.service-card:hover .service-card__actions,
+.service-card:focus-within .service-card__actions {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.2s ease var(--card-expand-delay);
+}
+
+/* Detail panel: an absolutely positioned continuation of the card. left/right
+   -1px so its border lines up with the card's side borders; it sits flush under
+   the header and its opaque background covers the card's own bottom edge. */
+.service-card__reveal {
+  position: absolute;
+  top: 100%;
+  left: -1px;
+  right: -1px;
+  z-index: 1;
+  padding: 0 1rem 1rem;
+  background-color: var(--card-bg-active);
+  border: 1px solid var(--card-border-active);
+  border-top: none;
+  border-bottom-left-radius: var(--card-radius);
+  border-bottom-right-radius: var(--card-radius);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.service-card:hover .service-card__reveal,
+.service-card:focus-within .service-card__reveal {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition: opacity 0.25s ease var(--card-expand-delay),
+    transform 0.25s ease var(--card-expand-delay);
+}
+
+.service-card__reveal-inner {
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .service-card,
+  .service-card:hover,
+  .service-card:focus-within,
+  .service-card__reveal,
+  .service-card:hover .service-card__reveal,
+  .service-card:focus-within .service-card__reveal,
+  .service-card__actions,
+  .service-card:hover .service-card__actions,
+  .service-card:focus-within .service-card__actions {
+    transition: none;
+  }
+
+  .service-card:hover,
+  .service-card:focus-within,
+  .service-card__reveal {
+    transform: none;
+  }
+}
+
+/* Collapsible host groups: click the heading to toggle its cards */
+.host-chevron {
+  transition: transform 0.2s ease;
+}
+
+.host-group.is-collapsed .host-chevron {
+  transform: rotate(-90deg);
+}
+
+.host-group.is-collapsed .host-cards {
+  display: none;
+}
+
+/* Search / filter panel sticks just below the fixed nav while scrolling.
+   z-index sits above hovered cards (20) but below the nav (40). */
+.search-panel {
+  position: sticky;
+  top: 4.5rem;
+  z-index: 30;
+}
+
+/* Floating scroll-to-top button (lower right), hidden until scrolled down */
+.scroll-top-btn {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  background-color: rgba(26, 26, 26, 0.7);
+  backdrop-filter: var(--acrylic-blur);
+  -webkit-backdrop-filter: var(--acrylic-blur);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 10px 35px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s,
+    background-color 0.15s ease, color 0.15s ease;
+}
+
+.scroll-top-btn:hover {
+  background-color: rgba(42, 42, 42, 0.85);
+  color: #fff;
+}
+
+.scroll-top-btn.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-top-btn {
+    transition: opacity 0.2s ease, visibility 0.2s;
+    transform: none;
+  }
+}
 
 /* Toast container */
 #toast-container {
