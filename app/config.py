@@ -48,3 +48,18 @@ class Config:
         "DATABASE_URL",
         f"mysql+pymysql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}?charset=utf8mb4",
     )
+
+    # Connection-pool hardening. MySQL closes idle connections after wait_timeout
+    # (and proxies/load balancers often much sooner), which surfaces as
+    # "Lost connection to MySQL server during query" (2013) or "MySQL server has
+    # gone away" (2006) on the next request that reuses a stale pooled connection.
+    #   - pool_pre_ping issues a lightweight liveness check before handing out a
+    #     connection and transparently reconnects if it's dead.
+    #   - pool_recycle proactively discards connections older than the interval so
+    #     we never reuse one the server has already timed out. Must stay below the
+    #     server's wait_timeout; 280s sits safely under both the MySQL default and
+    #     the common ~300s idle timeout on proxies.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "280")),
+    }
