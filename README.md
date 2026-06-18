@@ -206,6 +206,7 @@ Schema changes between versions are provided as plain SQL scripts in the `migrat
 | Script | What it does |
 |---|---|
 | `migrations/add_service_type.sql` | Adds the `service_type` column and makes `url` nullable - required for deployments predating service-type support |
+| `migrations/convert_to_innodb.sql` | Converts all tables to InnoDB - required only if your tables were created as MyISAM (symptom: error 1020 "Record has changed since last read"). Fresh installs are now created as InnoDB automatically |
 
 ```bash
 mysql -u <user> -p <database> < migrations/add_service_type.sql

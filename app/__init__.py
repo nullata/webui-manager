@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from flask import Flask, render_template
-from flask_wtf.csrf import CSRFProtect
+from flask import Flask, flash, redirect, render_template, request, url_for
+from flask_wtf.csrf import CSRFError, CSRFProtect
 
 from .config import Config
 from .healthchecks import start_healthcheck_worker
@@ -35,6 +35,17 @@ def create_app() -> Flask:
         db.create_all()
 
     init_auth(app)
+
+    @app.after_request
+    def add_no_cache_headers(response):
+        # Never let the browser cache rendered HTML. A page restored from the
+        # back/forward cache (bfcache) carries a CSRF token bound to a session
+        # that may since have been cleared, so resubmitting it (e.g. logging in
+        # after being logged out) fails with "CSRF token is missing". Static
+        # assets are left cacheable.
+        if request.endpoint != "static" and response.mimetype == "text/html":
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -73,6 +84,16 @@ def create_app() -> Flask:
 # error handlers
 ################
 
+
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(e):
+        # A stale/expired CSRF token (commonly a login form submitted after the
+        # session was cleared) used to dump the user on a dead 400 page reading
+        # "The CSRF token is missing", recoverable only by manually visiting the
+        # root URL. Instead, flash a friendly message and redirect through the
+        # root route, which re-issues a fresh token bound to the current session.
+        flash("Your session expired. Please try again.", "error")
+        return redirect(url_for("main.index"))
 
     @app.errorhandler(404)
     def not_found(e):

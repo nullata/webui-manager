@@ -180,7 +180,7 @@ img {
 /* Active card: opaque, lifted, raised above neighbours. Bottom corners square
    in sync with the panel so the two read as one continuous card. */
 .service-card:hover,
-.service-card:focus-within {
+.service-card:has(:focus-visible) {
   background-color: var(--card-bg-active);
   border-color: var(--card-border-active);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
@@ -193,18 +193,30 @@ img {
     border-radius 0.15s ease var(--card-expand-delay);
 }
 
-/* Edit / delete actions reveal together with the panel */
+/* Edit / delete actions reveal together with the panel. */
 .service-card__actions {
   opacity: 0;
-  pointer-events: none;
+  /* visibility (not just opacity) so the buttons are non-clickable AND
+     non-focusable while collapsed. No visibility in this base transition means
+     it flips to hidden the instant the card collapses, so the buttons are never
+     clickable once invisible. It's only delayed on the way in (see :hover). */
+  visibility: hidden;
   transition: opacity 0.2s ease;
 }
 
-.service-card:hover .service-card__actions,
-.service-card:focus-within .service-card__actions {
+.service-card:hover .service-card__actions {
   opacity: 1;
-  pointer-events: auto;
-  transition: opacity 0.2s ease var(--card-expand-delay);
+  visibility: visible;
+  transition: opacity 0.2s ease var(--card-expand-delay),
+    visibility 0s linear var(--card-expand-delay);
+}
+
+/* Keyboard focus is deliberate, so reveal immediately with no expand delay so
+   the buttons stay tabbable. */
+.service-card:has(:focus-visible) .service-card__actions {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.2s ease;
 }
 
 /* Detail panel: an absolutely positioned continuation of the card. left/right
@@ -225,17 +237,26 @@ img {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
   opacity: 0;
   transform: translateY(-6px);
-  pointer-events: none;
+  /* Hidden instantly on collapse (visibility not in this transition) so nothing
+     inside the panel is clickable once the card is closed. */
+  visibility: hidden;
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
-.service-card:hover .service-card__reveal,
-.service-card:focus-within .service-card__reveal {
+.service-card:hover .service-card__reveal {
   opacity: 1;
   transform: translateY(0);
-  pointer-events: auto;
+  visibility: visible;
   transition: opacity 0.25s ease var(--card-expand-delay),
-    transform 0.25s ease var(--card-expand-delay);
+    transform 0.25s ease var(--card-expand-delay),
+    visibility 0s linear var(--card-expand-delay);
+}
+
+.service-card:has(:focus-visible) .service-card__reveal {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 .service-card__reveal-inner {
@@ -245,18 +266,18 @@ img {
 @media (prefers-reduced-motion: reduce) {
   .service-card,
   .service-card:hover,
-  .service-card:focus-within,
+  .service-card:has(:focus-visible),
   .service-card__reveal,
   .service-card:hover .service-card__reveal,
-  .service-card:focus-within .service-card__reveal,
+  .service-card:has(:focus-visible) .service-card__reveal,
   .service-card__actions,
   .service-card:hover .service-card__actions,
-  .service-card:focus-within .service-card__actions {
+  .service-card:has(:focus-visible) .service-card__actions {
     transition: none;
   }
 
   .service-card:hover,
-  .service-card:focus-within,
+  .service-card:has(:focus-visible),
   .service-card__reveal {
     transform: none;
   }

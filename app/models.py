@@ -28,10 +28,15 @@ webui_categories = db.Table(
         "web_ui.id"), primary_key=True),
     db.Column("category_id", db.Integer, db.ForeignKey(
         "category.id"), primary_key=True),
+    # Force InnoDB: MyISAM ignores transactions and FKs, and raises error 1020
+    # ("Record has changed since last read") under the app's concurrent writes.
+    mysql_engine="InnoDB",
 )
 
 
 class User(db.Model):
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True,
                          nullable=False, index=True)
@@ -49,6 +54,8 @@ class User(db.Model):
 
 
 class Host(db.Model):
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), unique=True, nullable=False, index=True)
     description = db.Column(db.Text)
@@ -58,6 +65,8 @@ class Host(db.Model):
 
 
 class Category(db.Model):
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), unique=True, nullable=False, index=True)
     description = db.Column(db.Text)
@@ -65,6 +74,7 @@ class Category(db.Model):
 
 class AppSetting(db.Model):
     __tablename__ = "app_setting"
+    __table_args__ = {"mysql_engine": "InnoDB"}
 
     id = db.Column(db.Integer, primary_key=True, default=1)
     healthchecks_enabled = db.Column(db.Boolean, default=False, nullable=False)
@@ -88,6 +98,7 @@ class AppSetting(db.Model):
 
 class WebUI(db.Model):
     __tablename__ = "web_ui"
+    __table_args__ = {"mysql_engine": "InnoDB"}
 
     SERVICE_TYPES = ("web", "api")
 
@@ -130,6 +141,7 @@ class WebUI(db.Model):
 
 class HealthCheckLog(db.Model):
     __tablename__ = "healthcheck_log"
+    __table_args__ = {"mysql_engine": "InnoDB"}
 
     id = db.Column(db.Integer, primary_key=True)
     webui_id = db.Column(db.Integer, db.ForeignKey(
