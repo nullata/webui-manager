@@ -8,7 +8,7 @@ __pycache__/
 .gitignore
 *.jpg
 *.png
-README.md
+*.md
 docker-compose.yml
 LICENSE
 VERSION
