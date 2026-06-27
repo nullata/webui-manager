@@ -36,6 +36,12 @@ class Config:
     AUTO_MIGRATE = _env_bool("AUTO_MIGRATE", True)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Tie CSRF tokens to the session lifetime instead of Flask-WTF's default
+    # 1-hour wall-clock expiry. Otherwise a login page left open for over an
+    # hour fails on submit with "session expired" (the token timed out even
+    # though the session is still valid), forcing a reload before login works.
+    WTF_CSRF_TIME_LIMIT = None
+
     # db conn vars
     _db_user = os.getenv("DB_USER", "root")
     _db_password = os.getenv("DB_PASSWORD", "password")
