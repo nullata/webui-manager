@@ -296,12 +296,21 @@ img {
   display: none;
 }
 
-/* Search / filter panel sticks just below the fixed nav while scrolling.
-   z-index sits above hovered cards (20) but below the nav (40). */
+/* Search / filter panel sticks just below the nav while scrolling.
+   z-index sits above hovered cards (20) but below the nav (40). On small
+   screens the nav wraps to two rows, so a sticky panel would either hide under
+   it or eat half the viewport; there it scrolls normally and only sticks once
+   the nav is a single row (sm and up). */
 .search-panel {
-  position: sticky;
-  top: 4.5rem;
+  position: static;
   z-index: 30;
+}
+
+@media (min-width: 640px) {
+  .search-panel {
+    position: sticky;
+    top: 4.5rem;
+  }
 }
 
 /* Floating scroll-to-top button (lower right), hidden until scrolled down */
