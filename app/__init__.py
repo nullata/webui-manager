@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, send_from_directory, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 from .config import Config
@@ -24,6 +24,37 @@ from .auth import auth_bp, init_auth
 csrf = CSRFProtect()
 
 
+# Additive column migrations that db.create_all() can't apply to an existing
+# table. Kept in sync with the scripts under migrations/. Each entry is
+# (table, column, "ALTER TABLE ... ADD COLUMN ..."). The DDL must be valid on
+# both MySQL/MariaDB and SQLite. Applied idempotently on startup when
+# AUTO_MIGRATE is on (default), so upgrades don't require running SQL by hand.
+_ADDITIVE_MIGRATIONS = [
+    ("app_setting", "show_host_service_counts",
+     "ALTER TABLE app_setting ADD COLUMN show_host_service_counts BOOLEAN NOT NULL DEFAULT 1"),
+    ("web_ui", "healthcheck_ignored",
+     "ALTER TABLE web_ui ADD COLUMN healthcheck_ignored BOOLEAN NOT NULL DEFAULT 0"),
+]
+
+
+def _apply_additive_migrations(app: Flask) -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+    for table, column, ddl in _ADDITIVE_MIGRATIONS:
+        # Fresh installs get the full schema from create_all(); only patch
+        # tables that already exist but predate the column.
+        if table not in existing_tables:
+            continue
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        if column in columns:
+            continue
+        db.session.execute(text(ddl))
+        db.session.commit()
+        app.logger.info("Auto-migrate: added column %s.%s", table, column)
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -33,8 +64,17 @@ def create_app() -> Flask:
 
     with app.app_context():
         db.create_all()
+        if app.config.get("AUTO_MIGRATE", True):
+            _apply_additive_migrations(app)
 
     init_auth(app)
+
+    @app.route("/favicon.ico")
+    def favicon():
+        # Browsers auto-request /favicon.ico at the site root regardless of the
+        # <link rel="icon"> tags in <head>. Without this the request 404s (noisy
+        # console error on every page). Serve the committed icon from static.
+        return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/x-icon")
 
     @app.after_request
     def add_no_cache_headers(response):

@@ -1,7 +1,8 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}Setup Admin | WebUI Manager{% endblock %}
 {% block content %}
 <div class="max-w-md mx-auto mt-20 rounded-2xl bg-panel/85 border border-slate-700 p-8 shadow-neon">
+  <img src="{{ url_for('static', filename='images/webuimanager.svg') }}" alt="WebUI Manager" class="h-16 w-auto mx-auto mb-6" />
   <h1 class="font-display text-3xl text-white mb-2">Create Admin Account</h1>
   <p class="text-slate-300 text-sm mb-6">No users were found. Create the first admin account to continue.</p>
 

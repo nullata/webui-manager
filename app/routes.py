@@ -223,6 +223,8 @@ def _hydrate_webui(webui: WebUI) -> bool:
             db.select(Category).where(Category.id.in_(category_ids))
         ).all()
 
+    healthcheck_ignored = bool(request.form.get("healthcheck_ignored"))
+
     url_changed = url != webui.url
     healthcheck_changed = (healthcheck_url or '') != (webui.healthcheck_url or '')
     refresh_favicon = service_type == "web" and (url_changed or not webui.favicon_url) and bool(url)
@@ -231,6 +233,7 @@ def _hydrate_webui(webui: WebUI) -> bool:
     webui.url = url
     webui.description = description
     webui.healthcheck_url = healthcheck_url
+    webui.healthcheck_ignored = healthcheck_ignored
     webui.host = host
     webui.categories = selected_categories
     if url_changed:
@@ -254,7 +257,9 @@ def _hydrate_webui(webui: WebUI) -> bool:
         if password:
             webui.credential_password_encrypted = encrypt_secret(password)
 
-    if url_changed or healthcheck_changed:
+    # clear stale status on url/endpoint change, or when the service is now ignored
+    # (so the dashboard doesn't keep showing an old up/down dot for it)
+    if url_changed or healthcheck_changed or healthcheck_ignored:
         webui.last_healthcheck_at = None
         webui.last_healthcheck_ok = None
         webui.last_healthcheck_status = None
@@ -264,16 +269,31 @@ def _hydrate_webui(webui: WebUI) -> bool:
     return True
 
 
-def _queue_favicon_refresh(webui: WebUI) -> None:
-    if not getattr(webui, "_refresh_favicon", False):
+def _save_webui(webui: WebUI) -> tuple[int, str, bool]:
+    """Flush + commit a hydrated WebUI, returning the data needed to queue a
+    favicon refresh. Raises IntegrityError on a unique-URL collision.
+
+    The favicon target is read *before* commit on purpose: commit expires every
+    attribute on the instance (expire_on_commit), so reading webui.id/webui.url
+    afterwards would trigger a reload that can raise ObjectDeletedError and 500
+    the request even though the row was already persisted. Flushing first assigns
+    the primary key and surfaces the unique-URL violation as IntegrityError."""
+    db.session.add(webui)
+    db.session.flush()
+    favicon_target = (webui.id, webui.url, bool(getattr(webui, "_refresh_favicon", False)))
+    db.session.commit()
+    return favicon_target
+
+
+def _queue_favicon_refresh(webui_id: int, site_url: str, refresh: bool) -> None:
+    if not refresh:
         return
 
     trigger_favicon_refresh_async(
         current_app._get_current_object(),
-        webui.id,
-        webui.url,
+        webui_id,
+        site_url,
     )
-    webui._refresh_favicon = False
 
 
 @main_bp.route("/webuis/new", methods=["GET", "POST"])
@@ -288,15 +308,14 @@ def new_webui():
     if request.method == "POST":
         webui = WebUI()
         if _hydrate_webui(webui):
-            db.session.add(webui)
             try:
-                db.session.commit()
+                favicon_target = _save_webui(webui)
             except IntegrityError:
                 # url collision - the unique constraint on url fired
                 db.session.rollback()
                 flash("A WebUI with that URL already exists.", "error")
             else:
-                _queue_favicon_refresh(webui)
+                _queue_favicon_refresh(*favicon_target)
                 flash("WebUI created.", "success")
                 return redirect(url_for("main.webui_list"))
 
@@ -326,12 +345,12 @@ def edit_webui(webui_id: int):
     if request.method == "POST":
         if _hydrate_webui(webui):
             try:
-                db.session.commit()
+                favicon_target = _save_webui(webui)
             except IntegrityError:
                 db.session.rollback()
                 flash("Could not save changes. URL may already exist.", "error")
             else:
-                _queue_favicon_refresh(webui)
+                _queue_favicon_refresh(*favicon_target)
                 flash("WebUI updated.", "success")
                 return redirect(url_for("main.webui_list"))
 
@@ -349,6 +368,8 @@ def edit_webui(webui_id: int):
 @main_bp.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings_page():
+    from .notifications import parse_recipients
+
     settings = g.app_settings
     last_run = db.session.scalar(db.select(func.max(HealthCheckLog.checked_at)))
 
@@ -368,6 +389,9 @@ def settings_page():
         settings.healthchecks_enabled = enabled
         settings.healthcheck_interval_minutes = interval_minutes
 
+        # dashboard display preferences
+        settings.show_host_service_counts = bool(request.form.get("show_host_service_counts"))
+
         # SMTP / email settings
         smtp_host = (request.form.get("smtp_host") or "").strip()[:255]
         smtp_port_raw = (request.form.get("smtp_port") or "587").strip()
@@ -382,16 +406,21 @@ def settings_page():
             flash("SMTP port must be a number between 1 and 65535.", "error")
             return render_template("settings.html", settings=settings, last_run=last_run)
 
-        for addr, label in [(smtp_from, "From"), (smtp_to, "To")]:
-            if addr and "@" not in addr:
-                flash(f"{label} address doesn't look like a valid email.", "error")
-                return render_template("settings.html", settings=settings, last_run=last_run)
+        if smtp_from and "@" not in smtp_from:
+            flash("From address doesn't look like a valid email.", "error")
+            return render_template("settings.html", settings=settings, last_run=last_run)
+
+        # To may be a comma/semicolon-separated list of recipients - validate each
+        to_recipients = parse_recipients(smtp_to)
+        if any("@" not in addr for addr in to_recipients):
+            flash("Each To address must be a valid email; separate multiple recipients with commas.", "error")
+            return render_template("settings.html", settings=settings, last_run=last_run)
 
         settings.smtp_host = smtp_host or None
         settings.smtp_port = int(smtp_port_raw)
         settings.smtp_username = smtp_username or None
         settings.smtp_from_address = smtp_from or None
-        settings.smtp_to_address = smtp_to or None
+        settings.smtp_to_address = ", ".join(to_recipients) or None
         settings.smtp_use_starttls = smtp_starttls
         settings.email_notifications_enabled = email_enabled
 

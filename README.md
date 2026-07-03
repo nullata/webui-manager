@@ -207,6 +207,8 @@ Schema changes between versions are provided as plain SQL scripts in the `migrat
 |---|---|
 | `migrations/add_service_type.sql` | Adds the `service_type` column and makes `url` nullable - required for deployments predating service-type support |
 | `migrations/convert_to_innodb.sql` | Converts all tables to InnoDB - required only if your tables were created as MyISAM (symptom: error 1020 "Record has changed since last read"). Fresh installs are now created as InnoDB automatically |
+| `migrations/add_show_host_service_counts.sql` | Adds the `show_host_service_counts` column backing the Settings toggle for per-host service counts on the dashboard - required for deployments predating that toggle |
+| `migrations/add_healthcheck_ignored.sql` | Adds the `healthcheck_ignored` column backing the per-service "Exclude from health checks" toggle - required for deployments predating that toggle |
 
 ```bash
 mysql -u <user> -p <database> < migrations/add_service_type.sql

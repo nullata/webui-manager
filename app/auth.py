@@ -21,6 +21,7 @@ from flask import Blueprint, flash, g, redirect, render_template, request, sessi
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
+from .healthchecks import get_app_settings
 from .models import User, db
 
 _MAX_ATTEMPTS = 5
@@ -58,6 +59,13 @@ def _clear_failures(ip: str) -> None:
 
 
 auth_bp = Blueprint("auth", __name__)
+
+
+@auth_bp.before_request
+def _load_settings() -> None:
+    # Mirror main_bp so the login / setup pages can render the configured
+    # background image (base.html reads g.app_settings.background_image_filename).
+    g.app_settings = get_app_settings()
 
 
 def bootstrap_required() -> bool:

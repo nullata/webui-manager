@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}{{ 'Edit' if webui else 'New' }} Service | WebUI Manager{% endblock %}
 {% block content %}
 <div class="max-w-4xl mx-auto">
@@ -46,6 +46,22 @@
         <label class="block text-sm mb-1">Healthcheck Endpoint</label>
         <input name="healthcheck_url" value="{{ request.form.get('healthcheck_url', (webui.healthcheck_url or '') if webui else '') }}" placeholder="/health or https://example.local/health" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
         <p class="mt-2 text-xs text-slate-400">You can enter a full URL or a relative path like <span class="font-mono">/health</span>. If blank, the background checker will use the main app URL when periodic checks are enabled in Settings.</p>
+      </div>
+
+      {% set ignore_checked = request.form.get('healthcheck_ignored') if request.method == 'POST' else (webui.healthcheck_ignored if webui else false) %}
+      <div class="flex items-start gap-3 mt-4">
+        <div class="shrink-0 pt-1">
+          <input id="healthcheck_ignored" type="checkbox" name="healthcheck_ignored" value="1"
+            {% if ignore_checked %}checked{% endif %} class="sr-only" />
+          <button type="button" class="settings-toggle" data-toggle-control data-toggle-input="healthcheck_ignored"
+            aria-controls="healthcheck_ignored" aria-label="Toggle exclude from health checks">
+            <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+          </button>
+        </div>
+        <label for="healthcheck_ignored" class="block cursor-pointer">
+          <span class="block text-sm text-slate-200">Exclude from health checks</span>
+          <span class="block mt-1 text-xs text-slate-400">Skip this service in the background checker - useful for services that are intentionally shut down.</span>
+        </label>
       </div>
     </div>
 

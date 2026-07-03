@@ -1,16 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Dashboard | WebUI Manager{% endblock %}
 {% block content %}
-<div class="flex flex-wrap gap-3 items-center justify-between mb-6">
-  <div>
-    <h1 class="font-display text-3xl text-white">Dashboard</h1>
-    <p class="text-slate-300 text-sm">Manage UI endpoints, hosts, categories, optional credentials, and availability
-      checks.</p>
-  </div>
-  <a href="{{ url_for('main.new_webui') }}"
-    class="rounded-lg bg-white px-4 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
-    <i class="fa-solid fa-plus mr-1"></i>Add Service
-  </a>
+<div class="mb-6">
+  <h1 class="font-display text-3xl text-white">Dashboard</h1>
+  <p class="text-slate-300 text-sm">Manage UI endpoints, hosts, categories, optional credentials, and availability
+    checks.</p>
 </div>
 
 <form method="get" class="search-panel grid sm:grid-cols-4 gap-3 rounded-xl border border-slate-800 bg-panel/60 p-4 mb-6">
@@ -36,7 +30,13 @@
       <i class="fa-solid fa-magnifying-glass mr-1"></i>Search
     </button>
     <a href="{{ url_for('main.webui_list') }}"
-      class="rounded-lg border border-slate-700 px-4 py-2 hover:bg-slate-800 transition">Reset</a>
+      class="rounded-lg border border-slate-700 px-4 py-2 hover:bg-slate-800 transition">
+      <i class="fa-solid fa-arrow-rotate-left mr-1"></i>Reset
+    </a>
+    <a href="{{ url_for('main.new_webui') }}"
+      class="ml-auto rounded-lg bg-white px-4 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
+      <i class="fa-solid fa-plus mr-1"></i>Add Service
+    </a>
   </div>
 </form>
 
@@ -52,7 +52,9 @@
       {% else %}
       <i class="fa-solid fa-circle-question text-slate-600 text-sm"></i>Unassigned
       {% endif %}
+      {% if g.app_settings.show_host_service_counts %}
       <span class="ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-body text-slate-400">{{ items|length }}</span>
+      {% endif %}
     </button>
   </h2>
   <div class="host-cards grid grid-cols-1 items-start md:grid-cols-2 xl:grid-cols-3 gap-4">

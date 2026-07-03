@@ -56,7 +56,8 @@ def run_healthcheck_pass(webui_ids: Iterable[int] | None = None) -> int:
         if not settings.healthchecks_enabled:
             return 0
 
-        stmt = db.select(WebUI).order_by(WebUI.name.asc())
+        # services flagged as ignored are never checked, even if explicitly requested
+        stmt = db.select(WebUI).where(WebUI.healthcheck_ignored.is_(False)).order_by(WebUI.name.asc())
         selected_ids = list(webui_ids) if webui_ids is not None else []
         if selected_ids:
             stmt = stmt.where(WebUI.id.in_(selected_ids))

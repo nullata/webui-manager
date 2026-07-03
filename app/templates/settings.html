@@ -5,6 +5,7 @@
   {% set healthchecks_checked = request.form.get('healthchecks_enabled') if request.method == 'POST' else ('1' if settings.healthchecks_enabled else '') %}
   {% set email_checked = request.form.get('email_notifications_enabled') if request.method == 'POST' else ('1' if settings.email_notifications_enabled else '') %}
   {% set starttls_checked = request.form.get('smtp_use_starttls') if request.method == 'POST' else ('1' if settings.smtp_use_starttls else '') %}
+  {% set show_counts_checked = request.form.get('show_host_service_counts') if request.method == 'POST' else ('1' if settings.show_host_service_counts else '') %}
 
   <h1 class="font-display text-3xl text-white mb-2">Settings</h1>
   <p class="text-slate-300 text-sm mb-6">Configure the background availability checker and email notifications.</p>
@@ -100,11 +101,12 @@
             class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
         </div>
         <div>
-          <label class="block text-sm mb-1">To Address</label>
-          <input name="smtp_to_address" type="email"
+          <label class="block text-sm mb-1">To Address(es)</label>
+          <input name="smtp_to_address" type="email" multiple
             value="{{ request.form.get('smtp_to_address', settings.smtp_to_address or '') }}"
-            placeholder="you@example.com"
+            placeholder="you@example.com, ops@example.com"
             class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+          <p class="mt-1 text-xs text-slate-400">Separate multiple recipients with commas.</p>
         </div>
       </div>
 
@@ -154,6 +156,27 @@
         <input type="file" name="background_image" accept="image/*"
           class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-xs file:text-slate-200" />
         <p class="mt-1 text-xs text-slate-400">JPG, PNG, WebP, GIF, or AVIF. The image will be fixed to the viewport and page content scrolls over it.</p>
+      </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="border-t border-slate-800 pt-5">
+      <h2 class="font-display text-xl mb-4"><i class="fa-solid fa-table-columns mr-2 text-white"></i>Dashboard</h2>
+      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        <div class="flex items-start gap-4">
+          <div class="shrink-0 pt-1">
+            <input id="show_host_service_counts" type="checkbox" name="show_host_service_counts" value="1"
+              {% if show_counts_checked %}checked{% endif %} class="sr-only" />
+            <button type="button" class="settings-toggle" data-toggle-control data-toggle-input="show_host_service_counts"
+              aria-controls="show_host_service_counts" aria-label="Toggle service counts per host">
+              <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+            </button>
+          </div>
+          <label for="show_host_service_counts" class="block cursor-pointer">
+            <span class="block font-display text-lg text-slate-100">Show service counts per host</span>
+            <span class="block mt-1 text-sm text-slate-400">Display the number of services next to each host heading on the dashboard.</span>
+          </label>
+        </div>
       </div>
     </div>
 

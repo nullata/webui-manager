@@ -95,6 +95,9 @@ class AppSetting(db.Model):
     email_notifications_enabled = db.Column(db.Boolean, default=False, nullable=False)
     background_image_filename = db.Column(db.String(255))
 
+    # Dashboard display preferences
+    show_host_service_counts = db.Column(db.Boolean, default=True, nullable=False)
+
 
 class WebUI(db.Model):
     __tablename__ = "web_ui"
@@ -111,6 +114,8 @@ class WebUI(db.Model):
     description = db.Column(db.Text)
     favicon_url = db.Column(db.Text)
     healthcheck_url = db.Column(db.String(768))
+    # when true, the background checker skips this service (e.g. intentionally offline)
+    healthcheck_ignored = db.Column(db.Boolean, default=False, nullable=False)
     last_healthcheck_at = db.Column(db.DateTime)
     last_healthcheck_ok = db.Column(db.Boolean)
     last_healthcheck_status = db.Column(db.String(255))

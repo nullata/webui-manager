@@ -23,8 +23,17 @@ from .utils import decrypt_secret
 logger = logging.getLogger(__name__)
 
 
+def parse_recipients(raw: str | None) -> list[str]:
+    """Split the stored To field into individual addresses. Accepts comma- or
+    semicolon-separated lists and trims surrounding whitespace."""
+    if not raw:
+        return []
+    return [addr.strip() for addr in raw.replace(";", ",").split(",") if addr.strip()]
+
+
 def send_email(settings, subject: str, body: str) -> bool:
-    if not settings.smtp_host or not settings.smtp_from_address or not settings.smtp_to_address:
+    recipients = parse_recipients(settings.smtp_to_address)
+    if not settings.smtp_host or not settings.smtp_from_address or not recipients:
         logger.warning("Email not sent: SMTP not fully configured.")
         return False
 
@@ -33,7 +42,7 @@ def send_email(settings, subject: str, body: str) -> bool:
         msg = MIMEText(body)
         msg["Subject"] = subject
         msg["From"] = settings.smtp_from_address
-        msg["To"] = settings.smtp_to_address
+        msg["To"] = ", ".join(recipients)
 
         # self-signed certs are common in homelabs - skip verification
         ssl_ctx = ssl.create_default_context()
@@ -50,7 +59,7 @@ def send_email(settings, subject: str, body: str) -> bool:
                 smtp.starttls(context=ssl_ctx)
             if settings.smtp_username and password:
                 smtp.login(settings.smtp_username, password)
-            smtp.sendmail(settings.smtp_from_address, [settings.smtp_to_address], msg.as_string())
+            smtp.sendmail(settings.smtp_from_address, recipients, msg.as_string())
 
         return True
     except Exception:
