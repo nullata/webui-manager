@@ -14,3 +14,8 @@ LICENSE
 VERSION
 docker-image-build.sh
 build-tailwind.sh
+tailwindcss-linux-x64
+.vscode/
+.vessel_*/
+# SQLite data files (mounted separately via volume)
+data/
