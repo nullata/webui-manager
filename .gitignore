@@ -32,3 +32,7 @@ Thumbs.db
 tailwindcss-linux-x64
 
 .vessel_*/
+
+# Local data (SQLite database, uploaded background images)
+data/
+app/static/uploads/
