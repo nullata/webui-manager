@@ -17,7 +17,8 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from threading import Lock
 
-from flask import Blueprint, flash, g, redirect, render_template, request, session, url_for
+from flask import Blueprint, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask_wtf.csrf import generate_csrf
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
@@ -139,6 +140,20 @@ def login():
         flash("Invalid username or password.", "error")
 
     return render_template("login.html")
+
+
+@auth_bp.route("/csrf-token")
+def csrf_token():
+    # A login/setup page can outlive the session its embedded CSRF token was
+    # bound to (browser restart drops the session cookie, another tab rotates
+    # it). The form fetches this right before submitting so the POST always
+    # carries a token matching the session cookie it is sent with; otherwise
+    # the first attempt bounces through the CSRFError handler ("Your session
+    # expired") and the user has to log in twice.
+    response = jsonify({"csrf_token": generate_csrf()})
+    # the global no-cache after_request hook only covers text/html responses
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 @auth_bp.route("/setup-admin", methods=["GET", "POST"])

@@ -6,7 +6,7 @@
   <h1 class="font-display text-3xl text-white mb-2">Sign In</h1>
   <p class="text-slate-300 text-sm mb-6">Your WebUI catalog.</p>
 
-  <form method="post" class="space-y-4">
+  <form method="post" class="space-y-4" data-refresh-csrf="{{ url_for('auth.csrf_token') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     <div>
       <label class="block text-sm mb-1">Username</label>

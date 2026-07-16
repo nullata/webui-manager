@@ -105,6 +105,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Login/setup forms: a page left open long enough can outlive the session
+  // its embedded CSRF token was bound to (browser restart drops the session
+  // cookie, another tab rotates it). Swap in a token for the current session
+  // right before submitting, so the first attempt succeeds instead of bouncing
+  // through "Your session expired. Please try again."
+  document.querySelectorAll('form[data-refresh-csrf]').forEach(form => {
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      if (form.dataset.submitting) return;
+      form.dataset.submitting = '1';
+      fetch(form.dataset.refreshCsrf, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+          const field = form.querySelector('input[name="csrf_token"]');
+          if (field && data.csrf_token) field.value = data.csrf_token;
+        })
+        .catch(() => {}) // offline etc. - submit with the existing token
+        .finally(() => form.submit());
+    });
+  });
+
   document.querySelectorAll('img[data-fallback]').forEach(img => {
     img.addEventListener('error', () => {
       const icon = document.createElement('i');
