@@ -30,3 +30,5 @@ Thumbs.db
 # *.png
 
 tailwindcss-linux-x64
+
+.vessel_*/
