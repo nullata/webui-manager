@@ -1,5 +1,7 @@
 services:
   app:
+    # image: nullata/webui-manager:latest
+    # pull_policy: always
     build: .
     restart: unless-stopped
     ports:
@@ -13,4 +15,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-webui_manager}
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      # SQLite instead of MySQL: uncomment the two lines below (the DB_* vars
+      # above are then ignored) and the volumes sections to persist the file.
+      # DB_TYPE: sqlite
+      # DB_PATH: /data/webui_manager.sqlite
+    # volumes:
+    #   - db_data:/data
+
+# volumes:
+#   db_data:
 

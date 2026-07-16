@@ -16,7 +16,7 @@ A self-hosted Flask app for organizing and launching your internal web services.
 - Filter by host or category
 - Optional stored credentials (AES-encrypted at rest)
 - Background image upload with MIME type validation and 10 MB size limit
-- MySQL/MariaDB backend with automatic schema creation on first request
+- MySQL/MariaDB or self-contained SQLite backend, with automatic schema creation and migration on startup
 
 ## Service Types
 
@@ -30,9 +30,11 @@ Each entry has a service type that controls how the dashboard renders it.
 ## Requirements
 
 - Python 3.12+
-- MySQL or MariaDB
+- **MySQL/MariaDB** (default) — or use **SQLite** for self-contained deployments
 
 ## Setup
+
+### MySQL / MariaDB (default)
 
 ```bash
 # 1. Create and activate a virtual environment
@@ -61,21 +63,45 @@ SQL
 flask --app run.py run
 ```
 
-Tables are created automatically on the first request. Navigate to `/` and follow the admin setup prompt.
+Tables are created automatically on startup. Navigate to `/` and follow the admin setup prompt.
+
+### SQLite (self-contained, no external database)
+
+For single-user or simple deployments, set `DB_TYPE=sqlite` in your `.env` (or as an environment variable). The database file is stored at `DB_PATH` (default: `data/webui_manager.sqlite`).
+
+```bash
+# 1. Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env — set SECRET_KEY and ensure DB_TYPE=sqlite
+
+# 4. Run (database file created automatically)
+flask --app run.py run
+```
+
+The SQLite file is created automatically under `data/webui_manager.sqlite` on startup. Tables and schema are managed the same way as MySQL — auto-created and auto-migrated.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `SECRET_KEY` | Yes | Flask session signing key |
-| `DB_USER` | Yes | MySQL username |
-| `DB_PASSWORD` | Yes | MySQL password |
+| `DB_TYPE` | No | Database backend: `mysql` (default) or `sqlite` |
+| `DB_USER` | Conditional | MySQL username (required when `DB_TYPE=mysql`) |
+| `DB_PASSWORD` | Conditional | MySQL password (required when `DB_TYPE=mysql`) |
 | `DB_HOST` | No | MySQL host (default: `127.0.0.1`) |
 | `DB_PORT` | No | MySQL port (default: `3306`) |
 | `DB_NAME` | No | Database name (default: `webui_manager`) |
-| `DATABASE_URL` | No | Full SQLAlchemy URL, overrides all `DB_*` fields |
+| `DB_PATH` | No | SQLite file path (default: `data/webui_manager.sqlite`) |
+| `DATABASE_URL` | No | Full SQLAlchemy URL, overrides `DB_TYPE` and all `DB_*` fields |
 | `APP_CREDENTIALS_KEY` | No | Separate key for credential encryption (falls back to `SECRET_KEY`) |
-| `AUTO_MIGRATE` | No | Auto-create tables on first request (default: `true`) |
+| `AUTO_MIGRATE` | No | Sync existing tables to the current schema on startup (default: `true`). Missing tables are always created regardless |
 
 ## Docker Hub
 
@@ -102,7 +128,7 @@ cp .env.example .env
 
 ### 2a. Docker Compose - build from source
 
-The included `docker-compose.yml` builds the image locally. You will need an external MySQL/MariaDB instance reachable from the container; update `DB_HOST` in `.env` accordingly.
+The included `docker-compose.yml` builds the image locally. You will need an external MySQL/MariaDB instance reachable from the container; update `DB_HOST` in `.env` accordingly (or skip the external database entirely with SQLite — see 2d).
 
 ```bash
 docker compose up --build -d
@@ -195,26 +221,57 @@ docker run -d \
   nullata/webui-manager:latest
 ```
 
-### First run
+### 2d. Docker — self-contained with SQLite
 
-Once the container is running, navigate to `http://localhost:5000` (or your configured port). Tables are created automatically on the first request - follow the on-screen admin setup prompt.
-
-## Upgrading from v0.6.4
-
-Schema changes between versions are provided as plain SQL scripts in the `migrations/` directory. Run the relevant script against your database before (or immediately after) restarting the updated app.
-
-| Script | What it does |
-|---|---|
-| `migrations/add_service_type.sql` | Adds the `service_type` column and makes `url` nullable - required for deployments predating service-type support |
-| `migrations/convert_to_innodb.sql` | Converts all tables to InnoDB - required only if your tables were created as MyISAM (symptom: error 1020 "Record has changed since last read"). Fresh installs are now created as InnoDB automatically |
-| `migrations/add_show_host_service_counts.sql` | Adds the `show_host_service_counts` column backing the Settings toggle for per-host service counts on the dashboard - required for deployments predating that toggle |
-| `migrations/add_healthcheck_ignored.sql` | Adds the `healthcheck_ignored` column backing the per-service "Exclude from health checks" toggle - required for deployments predating that toggle |
+No external database needed. Mount a volume for the SQLite file so it survives container restarts:
 
 ```bash
-mysql -u <user> -p <database> < migrations/add_service_type.sql
+docker run -d \
+  --name webui-manager \
+  --restart unless-stopped \
+  -p 5000:5000 \
+  -e SECRET_KEY=change-this-secret \
+  -e DB_TYPE=sqlite \
+  -e DB_PATH=/data/webui_manager.sqlite \
+  -v webui-data:/data \
+  nullata/webui-manager:latest
 ```
 
-Fresh installs don't need to run any migration scripts - `db.create_all()` handles the full schema on first start.
+Or with Compose: the included `docker-compose.yml` already contains the SQLite lines commented out — uncomment `DB_TYPE`, `DB_PATH`, and the two `volumes` sections. The result looks like this (the `DB_*` MySQL vars are ignored when `DB_TYPE=sqlite`, so they can stay or go):
+
+```yaml
+services:
+  app:
+    build: .    # or: image: nullata/webui-manager:latest
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY}
+      APP_CREDENTIALS_KEY: ${APP_CREDENTIALS_KEY:-}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      DB_TYPE: sqlite
+      DB_PATH: /data/webui_manager.sqlite
+    volumes:
+      - db_data:/data
+
+volumes:
+  db_data:
+```
+
+```bash
+docker compose up -d
+```
+
+### First run
+
+Once the container is running, navigate to `http://localhost:5000` (or your configured port). Tables are created automatically on startup - follow the on-screen admin setup prompt.
+
+## Upgrading
+
+Schema migrations run automatically on startup (`AUTO_MIGRATE`, on by default): missing tables and columns are created, nullable and column-type changes are applied, and missing indexes, unique constraints, and MyISAM→InnoDB conversions are handled. Upgrading from any earlier version - including pre-service-type deployments - is just a matter of deploying the new version and restarting. Backing up your database before upgrading is still recommended.
+
+The plain SQL scripts in the `migrations/` directory are redundant with auto-migration and kept for reference; they are only needed if you run with `AUTO_MIGRATE=false` and want to apply schema changes by hand.
 
 ## Third-Party Licenses
 

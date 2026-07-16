@@ -18,7 +18,7 @@ For full documentation and source code visit [github.com/nullata/webui-manager](
 - Filter by host or category
 - Optional stored credentials (AES-encrypted at rest)
 - CSRF protection on all forms and AJAX requests
-- MySQL/MariaDB backend with automatic schema creation on first request
+- MySQL/MariaDB or self-contained SQLite backend, with automatic schema creation and migration on startup
 
 ## Quick Start
 
@@ -40,6 +40,26 @@ services:
       DB_NAME: webui_manager
 ```
 
+Or fully self-contained with SQLite - no external database, just a volume for the data file:
+
+```yaml
+services:
+  webui-manager:
+    image: nullata/webui-manager
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      SECRET_KEY: your-secret-key
+      DB_TYPE: sqlite
+      DB_PATH: /data/webui_manager.sqlite
+    volumes:
+      - db_data:/data
+
+volumes:
+  db_data:
+```
+
 Then run:
 
 ```bash
@@ -53,27 +73,20 @@ Navigate to `http://localhost:5000` and follow the admin setup prompt.
 | Variable | Required | Description |
 |---|---|---|
 | `SECRET_KEY` | Yes | Flask session signing key |
-| `DB_USER` | Yes | MySQL username |
-| `DB_PASSWORD` | Yes | MySQL password |
+| `DB_TYPE` | No | Database backend: `mysql` (default) or `sqlite` |
+| `DB_USER` | Conditional | MySQL username (required when `DB_TYPE=mysql`) |
+| `DB_PASSWORD` | Conditional | MySQL password (required when `DB_TYPE=mysql`) |
 | `DB_HOST` | No | MySQL host (default: `127.0.0.1`) |
 | `DB_PORT` | No | MySQL port (default: `3306`) |
 | `DB_NAME` | No | Database name (default: `webui_manager`) |
-| `DATABASE_URL` | No | Full SQLAlchemy URL, overrides all `DB_*` fields |
+| `DB_PATH` | No | SQLite file path (default: `data/webui_manager.sqlite`) |
+| `DATABASE_URL` | No | Full SQLAlchemy URL, overrides `DB_TYPE` and all `DB_*` fields |
 | `APP_CREDENTIALS_KEY` | No | Separate key for credential encryption (falls back to `SECRET_KEY`) |
-| `AUTO_MIGRATE` | No | Auto-create tables on first request (default: `true`) |
+| `AUTO_MIGRATE` | No | Sync existing tables to the current schema on startup (default: `true`). Missing tables are always created regardless |
 
 ## Upgrading
 
-### v0.7.5 - Breaking DB Schema Change
-
-v0.7.5 introduces schema changes that are **not backwards-compatible** with v0.6.4.
-
-If you are upgrading from v0.6.4 or earlier, you must either:
-
-- **Reinitialize the database** (drop and recreate) - all data will be lost, or
-- **Run the migration SQL** - see the [v0.7.5 release notes](https://github.com/nullata/webui-manager/releases/tag/0.7.5) for the required statements
-
-Fresh installs are unaffected; the schema is created automatically on first request.
+Schema migrations run automatically on startup (`AUTO_MIGRATE`, on by default): missing tables and columns are created, nullable and column-type changes are applied, and missing indexes, unique constraints, and MyISAM→InnoDB conversions are handled. Upgrading from any earlier version - including v0.6.4 and older - is just a matter of pulling the new image and restarting. Backing up your database before upgrading is still recommended.
 
 ## License
 
