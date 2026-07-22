@@ -50,6 +50,15 @@ class Config:
     AUTO_MIGRATE = _env_bool("AUTO_MIGRATE", True)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Flask's default session cookie name is the generic "session". Cookies are
+    # scoped by host and path only — the port is ignored — so a second Flask app
+    # on the same hostname (even on a different port) writes to the *same*
+    # cookie. Each app then fails to unsign the other's cookie with its own
+    # SECRET_KEY, drops the session, and the user appears logged out of
+    # whichever app they didn't just visit. A unique name keeps the two
+    # sessions side by side.
+    SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "webui_manager_session")
+
     # Tie CSRF tokens to the session lifetime instead of Flask-WTF's default
     # 1-hour wall-clock expiry. Otherwise a login page left open for over an
     # hour fails on submit with "session expired" (the token timed out even
