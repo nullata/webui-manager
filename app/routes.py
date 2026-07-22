@@ -539,6 +539,20 @@ def webui_history(webui_id: int):
     ])
 
 
+@main_bp.route("/webuis/<int:webui_id>/history/clear", methods=["POST"])
+@login_required
+def clear_webui_history(webui_id: int):
+    # wipes every stored check for this service, not just the last 24h the
+    # modal displays - otherwise older rows would resurface as the window moves.
+    # The service's current status (last_healthcheck_*) is live state, not
+    # history, so it's left alone and the next worker pass refreshes it.
+    db.get_or_404(WebUI, webui_id)
+    result = db.session.execute(
+        db.delete(HealthCheckLog).where(HealthCheckLog.webui_id == webui_id))
+    db.session.commit()
+    return jsonify({"ok": True, "deleted": result.rowcount})
+
+
 @main_bp.route("/webuis/<int:webui_id>/delete", methods=["POST"])
 @login_required
 def delete_webui(webui_id: int):

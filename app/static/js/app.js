@@ -29,6 +29,48 @@ function hideModal(id) {
   m.classList.remove('flex');
 }
 
+// The error modal is shared, so every caller sets its heading - otherwise the
+// previous caller's wording sticks around.
+function showError(title, message) {
+  document.getElementById('error-modal-title').textContent = title;
+  document.getElementById('error-modal-message').textContent = message;
+  showModal('error-modal');
+}
+
+// Renders the last-24h check rows into the history modal. Split out of the
+// open-modal handler so the Clear button can re-render in place afterwards.
+function loadHistory(url) {
+  const tbody = document.getElementById('history-tbody');
+  const empty = document.getElementById('history-empty');
+  tbody.innerHTML = '';
+  empty.classList.add('hidden');
+
+  return fetch(url)
+    .then(r => r.json())
+    .then(logs => {
+      if (!logs.length) {
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      [...logs].reverse().forEach((log, i) => {
+        const ts = new Date(log.checked_at).toISOString().replace('T', ' ').slice(0, 19);
+        const isOk = log.is_ok;
+        const tr = document.createElement('tr');
+        tr.className = i % 2 === 0 ? '' : 'history-row-alt';
+        tr.innerHTML = `
+          <td class="px-3 py-2 font-mono text-xs text-slate-300">${ts}</td>
+          <td class="px-3 py-2">
+            <span class="history-status">
+              <span class="history-dot ${isOk ? 'history-dot-ok' : 'history-dot-fail'}"></span>
+              <span class="${isOk ? 'history-text-ok' : 'history-text-fail'}">${isOk ? 'Online' : 'Offline'} - ${log.status_text}</span>
+            </span>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    });
+}
+
 function confirmModal(message) {
   return new Promise(resolve => {
     document.getElementById('confirm-modal-message').textContent = message;
@@ -158,10 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (r.ok) {
           location.reload();
         } else {
-          r.json().then(data => {
-            document.getElementById('error-modal-message').textContent = data.error;
-            showModal('error-modal');
-          });
+          r.json().then(data => showError('Cannot Delete', data.error));
         }
       });
     });
@@ -188,42 +227,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const historyClearBtn = document.getElementById('history-clear-btn');
+
   document.querySelectorAll('button.history-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.getElementById('history-modal-title').textContent = btn.dataset.name + ' -Last 24h';
+      // The modal is shared by every card, so point the Clear button at the
+      // service being opened right now.
+      historyClearBtn.dataset.url = btn.dataset.clearUrl;
+      historyClearBtn.dataset.reloadUrl = btn.dataset.url;
+      historyClearBtn.dataset.name = btn.dataset.name;
       showModal('history-modal');
-
-      const tbody = document.getElementById('history-tbody');
-      const empty = document.getElementById('history-empty');
-      tbody.innerHTML = '';
-      empty.classList.add('hidden');
-
-      fetch(btn.dataset.url)
-        .then(r => r.json())
-        .then(logs => {
-          if (!logs.length) {
-            empty.classList.remove('hidden');
-            return;
-          }
-
-          [...logs].reverse().forEach((log, i) => {
-            const ts = new Date(log.checked_at).toISOString().replace('T', ' ').slice(0, 19);
-            const isOk = log.is_ok;
-            const tr = document.createElement('tr');
-            tr.className = i % 2 === 0 ? '' : 'history-row-alt';
-            tr.innerHTML = `
-              <td class="px-3 py-2 font-mono text-xs text-slate-300">${ts}</td>
-              <td class="px-3 py-2">
-                <span class="history-status">
-                  <span class="history-dot ${isOk ? 'history-dot-ok' : 'history-dot-fail'}"></span>
-                  <span class="${isOk ? 'history-text-ok' : 'history-text-fail'}">${isOk ? 'Online' : 'Offline'} - ${log.status_text}</span>
-                </span>
-              </td>`;
-            tbody.appendChild(tr);
-          });
-        });
+      loadHistory(btn.dataset.url);
     });
   });
+
+  if (historyClearBtn) {
+    historyClearBtn.addEventListener('click', async () => {
+      const message = `Clear all health check history for "${historyClearBtn.dataset.name}"? This cannot be undone.`;
+      if (!await confirmModal(message)) return;
+      historyClearBtn.disabled = true;
+      fetch(historyClearBtn.dataset.url, { method: 'POST', headers: csrfHeaders() })
+        .then(r => {
+          if (!r.ok) {
+            showError('Cannot Clear History', 'The history could not be cleared. Please try again.');
+            return;
+          }
+          return loadHistory(historyClearBtn.dataset.reloadUrl);
+        })
+        .finally(() => { historyClearBtn.disabled = false; });
+    });
+  }
 
   const historyClose = document.getElementById('history-modal-close');
   if (historyClose) {
