@@ -7,9 +7,16 @@
     checks.</p>
 </div>
 
-<form method="get" class="search-panel grid sm:grid-cols-4 gap-3 rounded-xl border border-slate-800 bg-panel/60 p-4 mb-6">
-  <input name="q" value="{{ q }}" placeholder="Search name, url, description..."
-    class="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25" />
+<form method="get" id="search-form" {% if g.app_settings.live_search_enabled %}data-live-search="1"{% endif %}
+  class="search-panel grid sm:grid-cols-4 gap-3 rounded-xl border border-slate-800 bg-panel/60 p-4 mb-6">
+  <div class="sm:col-span-2 relative">
+    <input name="q" value="{{ q }}" placeholder="Search name, url, description..." autocomplete="off"
+      class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 pr-16 outline-none focus:ring-2 focus:ring-white/25" />
+    {# hotkey hint - without it nobody discovers the shortcut. hidden on small screens, which have no keyboard #}
+    <kbd id="search-hotkey-hint"
+      class="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 font-body text-[0.65rem] text-slate-400 sm:block">Ctrl
+      K</kbd>
+  </div>
   <select name="host_id"
     class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-white/25">
     <option value="">All hosts</option>
@@ -24,15 +31,19 @@
     <option value="{{ category.id }}" {% if category.id==category_id %}selected{% endif %}>{{ category.name }}</option>
     {% endfor %}
   </select>
-  <div class="sm:col-span-4 flex gap-2">
+  <div class="sm:col-span-4 flex flex-wrap items-center gap-2">
+    {# live search filters as you type, so a submit button would have nothing to do #}
+    {% if not g.app_settings.live_search_enabled %}
     <button class="rounded-lg border border-slate-600 text-white px-4 py-2 hover:bg-white/10 transition"
       type="submit">
       <i class="fa-solid fa-magnifying-glass mr-1"></i>Search
     </button>
-    <a href="{{ url_for('main.webui_list') }}"
+    {% endif %}
+    <a href="{{ url_for('main.webui_list') }}" id="search-reset-btn"
       class="rounded-lg border border-slate-700 px-4 py-2 hover:bg-slate-800 transition">
       <i class="fa-solid fa-arrow-rotate-left mr-1"></i>Reset
     </a>
+    <span id="live-search-count" class="hidden text-sm text-slate-400"></span>
     <a href="{{ url_for('main.new_webui') }}"
       class="ml-auto rounded-lg bg-white px-4 py-2 text-slate-900 font-semibold hover:bg-slate-100 transition">
       <i class="fa-solid fa-plus mr-1"></i>Add Service
@@ -53,13 +64,19 @@
       <i class="fa-solid fa-circle-question text-slate-600 text-sm"></i>Unassigned
       {% endif %}
       {% if g.app_settings.show_host_service_counts %}
-      <span class="ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-body text-slate-400">{{ items|length }}</span>
+      <span class="host-count ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-body text-slate-400"
+        data-total="{{ items|length }}">{{ items|length }}</span>
       {% endif %}
     </button>
   </h2>
   <div class="host-cards grid grid-cols-1 items-start md:grid-cols-2 xl:grid-cols-3 gap-4">
     {% for item in items %}
-    <article class="service-card flex flex-col rounded-xl border border-slate-800 p-4">
+    {# data-search mirrors the server-side query: name, url, description, host name, category names #}
+    {% set haystack = [item.name, item.url or '', item.description or '', item.host.name if item.host else '',
+                       item.categories | map(attribute='name') | join(' ')] | join(' ') %}
+    <article class="service-card flex flex-col rounded-xl border border-slate-800 p-4"
+      data-search="{{ haystack | lower }}" data-host-id="{{ item.host_id or '' }}"
+      data-category-ids="{{ item.categories | map(attribute='id') | join(' ') }}">
       <div class="flex justify-between gap-3">
         <div class="flex gap-3 min-w-0">
           <div class="relative shrink-0">
@@ -155,9 +172,15 @@
         <div class="flex items-center gap-2">
           <span class="text-slate-400 w-16 shrink-0">Password</span>
           <span class="credentials-password font-mono text-slate-200 select-all"></span>
-          <button class="ml-auto text-slate-400 hover:text-slate-200 toggle-password-btn"><i
-              class="fa-solid fa-eye"></i></button>
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            {# copies the fetched password straight out - no need to reveal it first #}
+            <button class="text-slate-400 hover:text-slate-200 copy-password-btn" title="Copy password"
+              aria-label="Copy password"><i class="fa-solid fa-copy"></i></button>
+            <button class="text-slate-400 hover:text-slate-200 toggle-password-btn" title="Show password"
+              aria-label="Show password"><i class="fa-solid fa-eye"></i></button>
+          </div>
         </div>
+        <p class="credentials-error hidden text-rose-300"></p>
       </div>
         </div>
       </div>
@@ -169,7 +192,17 @@
 {% else %}
 <div class="rounded-xl border border-dashed border-slate-700 bg-panel/50 p-10 text-center text-slate-300">
   <i class="fa-solid fa-folder-open text-2xl mb-2 text-slate-400"></i>
-  <p>No services found for the current filters.</p>
+  {# with live search on the server applies no filter, so an empty list means there are none at all #}
+  <p>{% if g.app_settings.live_search_enabled %}No services yet. Add one to get started.{% else %}No services found for
+    the current filters.{% endif %}</p>
+</div>
+{% endif %}
+
+{% if g.app_settings.live_search_enabled %}
+{# shown by live search when every card is filtered out; the block above is server-rendered and stays put #}
+<div id="live-search-empty" class="hidden rounded-xl border border-dashed border-slate-700 bg-panel/50 p-10 text-center text-slate-300">
+  <i class="fa-solid fa-folder-open text-2xl mb-2 text-slate-400"></i>
+  <p>No services match the current filters.</p>
 </div>
 {% endif %}
 

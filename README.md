@@ -12,9 +12,11 @@ A self-hosted Flask app for organizing and launching your internal web services.
 - CSRF protection on all forms and AJAX requests
 - Dashboard grouped by host with favicon auto-discovery
 - Optional background health checks with per-app healthcheck endpoints
-- Full-text search across name, URL, description, host, and category
+- Full-text search across name, URL, description, host, and category, with optional live (as-you-type) filtering
+- Ctrl+K / Cmd+K to jump to the search box
 - Filter by host or category
-- Optional stored credentials (AES-encrypted at rest)
+- Optional stored credentials (AES-encrypted at rest), copyable without revealing them
+- Export and import the whole catalog as JSON, for backup or bulk-adding services
 - Background image upload with MIME type validation and 10 MB size limit
 - MySQL/MariaDB or self-contained SQLite backend, with automatic schema creation and migration on startup
 
@@ -272,6 +274,24 @@ Once the container is running, navigate to `http://localhost:5000` (or your conf
 Schema migrations run automatically on startup (`AUTO_MIGRATE`, on by default): missing tables and columns are created, nullable and column-type changes are applied, and missing indexes, unique constraints, and MyISAM→InnoDB conversions are handled. Upgrading from any earlier version - including pre-service-type deployments - is just a matter of deploying the new version and restarting. Backing up your database before upgrading is still recommended.
 
 The plain SQL scripts in the `migrations/` directory are redundant with auto-migration and kept for reference; they are only needed if you run with `AUTO_MIGRATE=false` and want to apply schema changes by hand.
+
+## Development
+
+```bash
+# Test suite (pytest + Playwright) - see tests/README.md
+pip install -r requirements-dev.txt
+playwright install chromium          # one-off, for the browser tests
+pytest                               # everything
+pytest -m "not browser"              # API and database only, no browser needed
+
+# Rebuild the CSS after editing templates, JS, or tailwind-src.css.
+# Output (app/static/css/tailwind.css) is committed, so rebuild before pushing.
+./build-tailwind.sh
+```
+
+Tests run against a temporary SQLite database and never touch your `.env` or
+real database. There is no JavaScript build step - `app/static/js/app.js` is
+plain vanilla JS loaded directly.
 
 ## Third-Party Licenses
 

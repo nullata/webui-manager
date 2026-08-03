@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -44,13 +45,13 @@ def _uploads_dir() -> str:
     os.makedirs(path, exist_ok=True)
     return path
 
-from flask import Blueprint, current_app, flash, g, redirect, render_template, request, url_for, jsonify
+from flask import Blueprint, Response, current_app, flash, g, redirect, render_template, request, url_for, jsonify
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from .auth import login_required
-from .favicons import trigger_favicon_refresh_async
+from .favicons import trigger_favicon_backfill_async, trigger_favicon_refresh_async
 from .healthchecks import get_app_settings, notify_settings_changed, trigger_healthcheck_pass_async
 from .models import Category, HealthCheckLog, Host, User, WebUI, db
 
@@ -87,14 +88,25 @@ def webui_list():
     host_id = request.args.get("host_id", type=int)
     category_id = request.args.get("category_id", type=int)
 
+    # With live search on the browser filters the rendered cards, so the server
+    # hands over every service and applies no filter of its own. Filtering here
+    # too would cap what the client can ever match: reloading a filtered URL and
+    # then widening the term would search only the previous result set and
+    # silently return less. q/host_id/category_id still reach the template so
+    # the form is primed and the client re-applies them on load.
+    if settings.live_search_enabled:
+        filter_q, filter_host_id, filter_category_id = "", None, None
+    else:
+        filter_q, filter_host_id, filter_category_id = q, host_id, category_id
+
     # eager load host and categories so we dont get n+1 queries when rendering cards
     stmt = db.select(WebUI).options(joinedload(
         WebUI.host), joinedload(WebUI.categories))
     # track whether we already joined categories so we dont do it twice
     categories_joined = False
 
-    if q:
-        like = f"%{q}%"
+    if filter_q:
+        like = f"%{filter_q}%"
         # search across name, url, description, host name, and category name
         stmt = (
             stmt.outerjoin(WebUI.host)
@@ -112,14 +124,14 @@ def webui_list():
         )
         categories_joined = True
 
-    if host_id:
-        stmt = stmt.where(WebUI.host_id == host_id)
+    if filter_host_id:
+        stmt = stmt.where(WebUI.host_id == filter_host_id)
 
-    if category_id:
+    if filter_category_id:
         # only join categories if the search didnt already do it
         if not categories_joined:
             stmt = stmt.join(WebUI.categories)
-        stmt = stmt.where(Category.id == category_id)
+        stmt = stmt.where(Category.id == filter_category_id)
 
     # unique is required when using joinedload with scalars - prevents duplicates from the join
     webuis = db.session.scalars(stmt.order_by(WebUI.name.asc())).unique().all()
@@ -391,6 +403,7 @@ def settings_page():
 
         # dashboard display preferences
         settings.show_host_service_counts = bool(request.form.get("show_host_service_counts"))
+        settings.live_search_enabled = bool(request.form.get("live_search_enabled"))
 
         # SMTP / email settings
         smtp_host = (request.form.get("smtp_host") or "").strip()[:255]
@@ -473,6 +486,238 @@ def settings_page():
     return render_template("settings.html", settings=settings, last_run=last_run)
 
 
+# Bump when the payload shape changes in a way importers must branch on.
+_EXPORT_VERSION = 1
+_MAX_IMPORT_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+@main_bp.route("/services/export", methods=["POST"])
+@login_required
+def export_services():
+    """Download the whole catalog as JSON, for backup or moving between installs."""
+    include_passwords = bool(request.form.get("include_passwords"))
+
+    webuis = db.session.scalars(
+        db.select(WebUI)
+        .options(joinedload(WebUI.host), joinedload(WebUI.categories))
+        .order_by(WebUI.name.asc())
+    ).unique().all()
+
+    services = []
+    for webui in webuis:
+        entry = {
+            "name": webui.name,
+            "service_type": webui.service_type,
+            "url": webui.url,
+            "description": webui.description or "",
+            "host": webui.host.name if webui.host else None,
+            "categories": sorted(category.name for category in webui.categories),
+            "healthcheck_url": webui.healthcheck_url or "",
+            "healthcheck_ignored": webui.healthcheck_ignored,
+            # favicons are stored as self-contained data: URIs, so carrying them
+            # makes a restore look right immediately instead of re-fetching
+            "favicon_url": webui.favicon_url,
+            "credential_username": webui.credential_username or "",
+        }
+        if include_passwords:
+            # The stored ciphertext is bound to this install's key and is
+            # useless anywhere else, so it is plaintext or nothing.
+            entry["credential_password"] = decrypt_secret(
+                webui.credential_password_encrypted) or ""
+        services.append(entry)
+
+    hosts = db.session.scalars(db.select(Host).order_by(Host.name.asc())).all()
+    categories = db.session.scalars(db.select(Category).order_by(Category.name.asc())).all()
+
+    payload = {
+        "version": _EXPORT_VERSION,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "includes_passwords": include_passwords,
+        "hosts": [{"name": h.name, "description": h.description or ""} for h in hosts],
+        "categories": [{"name": c.name, "description": c.description or ""} for c in categories],
+        "services": services,
+    }
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        json.dumps(payload, indent=2),
+        mimetype="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="webui-manager-export-{stamp}.json"',
+        },
+    )
+
+
+def _named_record_map(model):
+    return {record.name: record for record in db.session.scalars(db.select(model)).all()}
+
+
+def _resolve_or_create(model, cache: dict, name: str, description: str = ""):
+    """Look a Host/Category up by name, creating it if the import mentions one
+    we don't have. Added to the session but not committed - the import commits
+    everything in one go."""
+    name = (name or "").strip()[:120]
+    if not name:
+        return None
+    if name in cache:
+        return cache[name]
+
+    record = model(name=name, description=(description or "").strip())
+    db.session.add(record)
+    cache[name] = record
+    return record
+
+
+def _parse_import_payload(payload):
+    """Accept either a full export envelope or a bare list of services.
+    Returns (services, hosts, categories) or None if the shape is unusable."""
+    if isinstance(payload, list):
+        return payload, [], []
+    if isinstance(payload, dict):
+        services = payload.get("services")
+        if isinstance(services, list):
+            return (
+                services,
+                payload.get("hosts") if isinstance(payload.get("hosts"), list) else [],
+                payload.get("categories") if isinstance(payload.get("categories"), list) else [],
+            )
+    return None
+
+
+@main_bp.route("/services/import", methods=["POST"])
+@login_required
+def import_services():
+    upload = request.files.get("import_file")
+    if not upload or not upload.filename:
+        flash("Choose a JSON file to import.", "error")
+        return redirect(url_for("main.settings_page") + "#services")
+
+    raw = upload.read(_MAX_IMPORT_BYTES + 1)
+    if len(raw) > _MAX_IMPORT_BYTES:
+        flash("Import file must be 5 MB or smaller.", "error")
+        return redirect(url_for("main.settings_page") + "#services")
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        flash("That file isn't valid JSON.", "error")
+        return redirect(url_for("main.settings_page") + "#services")
+
+    parsed = _parse_import_payload(payload)
+    if parsed is None:
+        flash("No services found in that file. Expected an export file or a list of services.", "error")
+        return redirect(url_for("main.settings_page") + "#services")
+
+    entries, host_meta, category_meta = parsed
+
+    host_cache = _named_record_map(Host)
+    category_cache = _named_record_map(Category)
+
+    # Seed descriptions from the envelope first, so hosts/categories created
+    # here keep them rather than being made bare by the first service that
+    # happens to reference them.
+    for item in host_meta:
+        if isinstance(item, dict) and item.get("name"):
+            _resolve_or_create(Host, host_cache, item["name"], item.get("description", ""))
+    for item in category_meta:
+        if isinstance(item, dict) and item.get("name"):
+            _resolve_or_create(Category, category_cache, item["name"], item.get("description", ""))
+
+    taken_urls = {
+        url for url in db.session.scalars(db.select(WebUI.url)).all() if url
+    }
+
+    imported, skipped, invalid = 0, 0, 0
+    created_ids_pending_favicon = []
+    new_webuis = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            invalid += 1
+            continue
+
+        name = str(entry.get("name") or "").strip()[:150]
+        if not name:
+            invalid += 1
+            continue
+
+        service_type = str(entry.get("service_type") or "web").strip()
+        if service_type not in WebUI.SERVICE_TYPES:
+            service_type = "web"
+
+        raw_url = str(entry.get("url") or "").strip()
+        url = normalize_url(raw_url)[:768] if raw_url else None
+        if not url:
+            # web and api both need somewhere to point
+            invalid += 1
+            continue
+
+        if url in taken_urls:
+            # url is unique in the schema; treat a repeat as "already have it"
+            skipped += 1
+            continue
+
+        webui = WebUI(
+            name=name,
+            service_type=service_type,
+            url=url,
+            description=str(entry.get("description") or "").strip(),
+            healthcheck_url=str(entry.get("healthcheck_url") or "").strip()[:768],
+            healthcheck_ignored=bool(entry.get("healthcheck_ignored")),
+            favicon_url=entry.get("favicon_url") or None,
+            credential_username=str(entry.get("credential_username") or "").strip()[:255],
+        )
+
+        password = entry.get("credential_password")
+        if password:
+            webui.credential_password_encrypted = encrypt_secret(str(password))
+
+        host_name = entry.get("host")
+        if host_name:
+            webui.host = _resolve_or_create(Host, host_cache, str(host_name))
+
+        raw_categories = entry.get("categories")
+        if isinstance(raw_categories, list):
+            resolved = [
+                _resolve_or_create(Category, category_cache, str(item))
+                for item in raw_categories if str(item).strip()
+            ]
+            webui.categories = [c for c in resolved if c is not None]
+
+        db.session.add(webui)
+        new_webuis.append(webui)
+        taken_urls.add(url)
+        imported += 1
+
+    if not imported and not skipped and not invalid:
+        flash("That file contained no services to import.", "info")
+        return redirect(url_for("main.settings_page") + "#services")
+
+    try:
+        db.session.flush()
+        # Read ids before commit: commit expires the instances, and re-reading
+        # them afterwards would issue a reload per service.
+        created_ids_pending_favicon = [
+            w.id for w in new_webuis
+            if w.service_type == "web" and w.url and not w.favicon_url
+        ]
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Import failed - the file collides with existing data (duplicate URL or name).", "error")
+        return redirect(url_for("main.settings_page") + "#services")
+
+    trigger_favicon_backfill_async(current_app._get_current_object(), created_ids_pending_favicon)
+
+    parts = [f"{imported} imported"]
+    if skipped:
+        parts.append(f"{skipped} skipped (URL already present)")
+    if invalid:
+        parts.append(f"{invalid} unusable")
+    flash("Import complete: " + ", ".join(parts) + ".", "success" if imported else "info")
+    return redirect(url_for("main.settings_page") + "#services")
+
+
 @main_bp.route("/settings/change-password", methods=["POST"])
 @login_required
 def change_password():
@@ -513,9 +758,18 @@ def test_email():
 def webui_credentials(webui_id: int):
     # returns decrypted credentials as json - called by the js reveal button on the dashboard
     webui = db.get_or_404(WebUI, webui_id)
+    encrypted = webui.credential_password_encrypted
+    password = decrypt_secret(encrypted) if encrypted else None
+
+    # decrypt_secret swallows InvalidToken and returns None, so a stored-but-
+    # undecryptable password is indistinguishable from no password at all.
+    # Flag it instead of showing an empty field: the usual cause is SECRET_KEY
+    # being rotated without APP_CREDENTIALS_KEY set, and silence sends people
+    # hunting for a bug that isn't there.
     return jsonify({
         "username": webui.credential_username or "",
-        "password": decrypt_secret(webui.credential_password_encrypted) or "",
+        "password": password or "",
+        "decrypt_failed": bool(encrypted) and password is None,
     })
 
 

@@ -19,3 +19,8 @@ tailwindcss-linux-x64
 .vessel_*/
 # SQLite data files (mounted separately via volume)
 data/
+
+tests/
+pytest.ini
+requirements-dev.txt
+.pytest_cache/

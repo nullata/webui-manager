@@ -6,6 +6,7 @@
   {% set email_checked = request.form.get('email_notifications_enabled') if request.method == 'POST' else ('1' if settings.email_notifications_enabled else '') %}
   {% set starttls_checked = request.form.get('smtp_use_starttls') if request.method == 'POST' else ('1' if settings.smtp_use_starttls else '') %}
   {% set show_counts_checked = request.form.get('show_host_service_counts') if request.method == 'POST' else ('1' if settings.show_host_service_counts else '') %}
+  {% set live_search_checked = request.form.get('live_search_enabled') if request.method == 'POST' else ('1' if settings.live_search_enabled else '') %}
 
   <h1 class="font-display text-3xl text-white mb-2">Settings</h1>
   <p class="text-slate-300 text-sm mb-6">Configure the background availability checker and email notifications.</p>
@@ -178,6 +179,23 @@
           </label>
         </div>
       </div>
+
+      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4 mt-4">
+        <div class="flex items-start gap-4">
+          <div class="shrink-0 pt-1">
+            <input id="live_search_enabled" type="checkbox" name="live_search_enabled" value="1"
+              {% if live_search_checked %}checked{% endif %} class="sr-only" />
+            <button type="button" class="settings-toggle" data-toggle-control data-toggle-input="live_search_enabled"
+              aria-controls="live_search_enabled" aria-label="Toggle live search">
+              <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+            </button>
+          </div>
+          <label for="live_search_enabled" class="block cursor-pointer">
+            <span class="block font-display text-lg text-slate-100">Live search</span>
+            <span class="block mt-1 text-sm text-slate-400">Filter the dashboard as you type instead of submitting the search form. Matching happens in the browser across the services already on the page, so it is instant and never reloads. The Search button is removed while this is on.</span>
+          </label>
+        </div>
+      </div>
     </div>
 
     <div class="flex gap-3 border-t border-slate-800 pt-5">
@@ -186,6 +204,45 @@
       </button>
     </div>
   </form>
+
+  <!-- Backup & Restore - two sibling forms, kept out of the settings form above -->
+  <div id="services" class="rounded-xl border border-slate-800 bg-panel/70 p-6 mt-6 space-y-5">
+    <div>
+      <h2 class="font-display text-xl"><i class="fa-solid fa-box-archive mr-2 text-white"></i>Backup &amp; Restore</h2>
+      <p class="mt-1 text-sm text-slate-400">Export every service, host and category as a JSON file, or bulk-add
+        services from one.</p>
+    </div>
+
+    <form method="post" action="{{ url_for('main.export_services') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <label class="flex items-start gap-2 text-sm text-slate-300 mb-3">
+        <input type="checkbox" name="include_passwords" value="1"
+          class="mt-0.5 rounded border-slate-600 bg-slate-800 text-amber-400" />
+        <span>Include stored passwords in <span class="text-amber-300">plain text</span>. Off by default — the
+          encrypted form is tied to this install's key and can't be read anywhere else, so a password-free export
+          restores everything except credentials.</span>
+      </label>
+      <button type="submit"
+        class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 transition">
+        <i class="fa-solid fa-download mr-1"></i>Export services
+      </button>
+    </form>
+
+    <form method="post" action="{{ url_for('main.import_services') }}" enctype="multipart/form-data"
+      class="border-t border-slate-800 pt-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <label class="block text-sm mb-1">Import from file</label>
+      <input type="file" name="import_file" accept="application/json,.json"
+        class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-xs file:text-slate-200" />
+      <p class="mt-1 text-xs text-slate-400">Accepts an export file or a bare JSON list of services. Missing hosts and
+        categories are created automatically; a service whose URL already exists is skipped, so re-importing the same
+        file changes nothing. Missing favicons are fetched in the background afterwards.</p>
+      <button type="submit"
+        class="mt-3 rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 transition">
+        <i class="fa-solid fa-upload mr-1"></i>Import services
+      </button>
+    </form>
+  </div>
 
   <!-- Admin Password - separate form so it doesn't interfere with settings save -->
   <form method="post" action="{{ url_for('main.change_password') }}"

@@ -97,6 +97,8 @@ class AppSetting(db.Model):
 
     # Dashboard display preferences
     show_host_service_counts = db.Column(db.Boolean, default=True, nullable=False)
+    # filter the dashboard as you type instead of requiring a form submit
+    live_search_enabled = db.Column(db.Boolean, default=False, nullable=False)
 
 
 class WebUI(db.Model):

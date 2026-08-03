@@ -14,9 +14,11 @@ For full documentation and source code visit [github.com/nullata/webui-manager](
 - Login rate limiting (5 failed attempts triggers a 5-minute IP lockout)
 - Dashboard grouped by host with favicon auto-discovery
 - Custom background image support
-- Full-text search across name, URL, description, host, and category
+- Full-text search across name, URL, description, host, and category, with optional live (as-you-type) filtering
+- Ctrl+K / Cmd+K to jump to the search box
 - Filter by host or category
-- Optional stored credentials (AES-encrypted at rest)
+- Optional stored credentials (AES-encrypted at rest), copyable without revealing them
+- Export and import the whole catalog as JSON, for backup or bulk-adding services
 - CSRF protection on all forms and AJAX requests
 - MySQL/MariaDB or self-contained SQLite backend, with automatic schema creation and migration on startup
 

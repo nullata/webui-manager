@@ -90,6 +90,24 @@ function confirmModal(message) {
   });
 }
 
+const HOST_COLLAPSE_PREFIX = 'host-collapsed:';
+
+// Collapse state is applied from two places - the heading click handler and
+// live search, which opens groups holding matches - so keep it in one helper.
+function setGroupCollapsed(group, collapsed) {
+  group.classList.toggle('is-collapsed', collapsed);
+  const btn = group.querySelector('.host-toggle');
+  if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function storedGroupCollapsed(group) {
+  try {
+    return localStorage.getItem(HOST_COLLAPSE_PREFIX + group.dataset.hostKey) === '1';
+  } catch (e) {
+    return false;
+  }
+}
+
 function syncToggleState(toggle, input) {
   const checked = !!input.checked;
   toggle.dataset.checked = checked ? 'true' : 'false';
@@ -99,6 +117,185 @@ function syncToggleState(toggle, input) {
 function dismissToast(toast) {
   toast.classList.add('toast-dismissed');
   setTimeout(() => toast.remove(), 300);
+}
+
+// navigator.clipboard only exists in a secure context, and these dashboards are
+// routinely served over plain HTTP on a LAN address, so fall back to the old
+// execCommand path instead of leaving the copy button dead exactly where most
+// installs run. Resolves to whether the copy actually happened.
+function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(() => true, () => false);
+  }
+
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.top = '-1000px';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  area.setSelectionRange(0, text.length); // iOS Safari ignores select() alone
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch (e) {
+    ok = false;
+  }
+  area.remove();
+  return Promise.resolve(ok);
+}
+
+// Swaps a button's icon for a tick or a cross, then puts it back.
+function flashButtonResult(btn, originalHtml, originalTitle, ok) {
+  clearTimeout(btn._flashTimer);
+  btn.innerHTML = ok
+    ? '<i class="fa-solid fa-check text-emerald-400"></i>'
+    : '<i class="fa-solid fa-xmark text-rose-400"></i>';
+  btn.title = ok ? 'Copied' : 'Copy failed';
+  btn._flashTimer = setTimeout(() => {
+    btn.innerHTML = originalHtml;
+    btn.title = originalTitle;
+  }, 1500);
+}
+
+// Ctrl+K (Cmd+K on a Mac) focuses the dashboard search from anywhere on the
+// page. Bound whether or not live search is on - jumping to the box is useful
+// either way.
+function initSearchHotkey(form) {
+  const input = form.querySelector('input[name="q"]');
+  if (!input) return;
+
+  const hint = document.getElementById('search-hotkey-hint');
+  if (hint && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+    hint.textContent = '⌘ K';
+  }
+
+  document.addEventListener('keydown', e => {
+    if (!e.key || e.key.toLowerCase() !== 'k' || e.altKey) return;
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    input.focus();
+    input.select();
+  });
+
+  input.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    // First Escape clears the filter, a second one gets you out of the field.
+    if (input.value) {
+      input.value = '';
+      // Live search listens for this; with the setting off it is a no-op.
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      input.blur();
+    }
+  });
+}
+
+// Live search filters the dashboard cards already on the page instead of
+// round-tripping the search form. The route skips its own filtering while this
+// is on and renders every service, so the full set is always here to match
+// against - including after a reload of a filtered URL. Matching is a
+// case-insensitive substring over data-search, the same five fields and the
+// same semantics as the server's ILIKE query, so results are identical whether
+// the setting is on or off.
+function initLiveSearch(form) {
+  const input = form.querySelector('input[name="q"]');
+  const hostSelect = form.querySelector('select[name="host_id"]');
+  const categorySelect = form.querySelector('select[name="category_id"]');
+  if (!input || !hostSelect || !categorySelect) return;
+
+  const cards = [...document.querySelectorAll('.service-card')];
+  const groups = [...document.querySelectorAll('.host-group')];
+  const emptyState = document.getElementById('live-search-empty');
+  const countLabel = document.getElementById('live-search-count');
+  const resetBtn = document.getElementById('search-reset-btn');
+
+  // Enter in the text field would otherwise submit and reload the page.
+  form.addEventListener('submit', e => e.preventDefault());
+
+  let wasFiltered = false;
+  let urlTimer = null;
+
+  // Rewriting the URL keeps a reload or a bookmark on the current filter, but
+  // browsers rate-limit replaceState, so it trails the keystrokes.
+  const syncUrl = (term, hostId, categoryId) => {
+    clearTimeout(urlTimer);
+    urlTimer = setTimeout(() => {
+      const params = new URLSearchParams();
+      if (term) params.set('q', term);
+      if (hostId) params.set('host_id', hostId);
+      if (categoryId) params.set('category_id', categoryId);
+      const query = params.toString();
+      history.replaceState(null, '', query ? location.pathname + '?' + query : location.pathname);
+    }, 300);
+  };
+
+  const apply = (updateUrl) => {
+    const term = input.value.trim();
+    const needle = term.toLowerCase();
+    const hostId = hostSelect.value;
+    const categoryId = categorySelect.value;
+    const filtered = !!(needle || hostId || categoryId);
+    let visible = 0;
+
+    cards.forEach(card => {
+      const match =
+        (!needle || card.dataset.search.includes(needle)) &&
+        (!hostId || card.dataset.hostId === hostId) &&
+        (!categoryId || card.dataset.categoryIds.split(' ').includes(categoryId));
+      card.classList.toggle('hidden', !match);
+      if (match) visible += 1;
+    });
+
+    groups.forEach(group => {
+      const wasHidden = group.classList.contains('hidden');
+      const shown = group.querySelectorAll('.service-card:not(.hidden)').length;
+      group.classList.toggle('hidden', shown === 0);
+
+      const count = group.querySelector('.host-count');
+      if (count) count.textContent = filtered ? shown : count.dataset.total;
+
+      if (!filtered) {
+        // Filter cleared - hand the group back to whatever the user last chose.
+        setGroupCollapsed(group, storedGroupCollapsed(group));
+      } else if (shown && (wasHidden || !wasFiltered)) {
+        // A collapsed group hides its own matches, so open it as it comes into
+        // view. Only on that transition: collapsing a group mid-search is a
+        // deliberate act and must survive the next keystroke.
+        setGroupCollapsed(group, false);
+      }
+    });
+
+    if (emptyState) emptyState.classList.toggle('hidden', visible > 0 || cards.length === 0);
+    if (countLabel) {
+      countLabel.textContent = visible + ' of ' + cards.length + ' services';
+      countLabel.classList.toggle('hidden', !filtered);
+    }
+
+    wasFiltered = filtered;
+    if (updateUrl) syncUrl(term, hostId, categoryId);
+  };
+
+  input.addEventListener('input', () => apply(true));
+  hostSelect.addEventListener('change', () => apply(true));
+  categorySelect.addEventListener('change', () => apply(true));
+
+  if (resetBtn) {
+    resetBtn.addEventListener('click', e => {
+      e.preventDefault();
+      input.value = '';
+      hostSelect.value = '';
+      categorySelect.value = '';
+      apply(true);
+      input.focus();
+    });
+  }
+
+  // The page may already be filtered server-side via query params; re-running
+  // the same filter here is a no-op that just primes the counts and labels.
+  apply(false);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -122,22 +319,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('.host-toggle').forEach(btn => {
     const group = btn.closest('.host-group');
-    const storageKey = 'host-collapsed:' + group.dataset.hostKey;
 
-    const setCollapsed = (collapsed, persist) => {
-      group.classList.toggle('is-collapsed', collapsed);
-      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-      if (persist) {
-        try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
-      }
-    };
+    if (storedGroupCollapsed(group)) setGroupCollapsed(group, true);
 
-    let stored = null;
-    try { stored = localStorage.getItem(storageKey); } catch (e) { /* ignore */ }
-    if (stored === '1') setCollapsed(true, false);
-
-    btn.addEventListener('click', () => setCollapsed(!group.classList.contains('is-collapsed'), true));
+    btn.addEventListener('click', () => {
+      const collapsed = !group.classList.contains('is-collapsed');
+      setGroupCollapsed(group, collapsed);
+      try {
+        localStorage.setItem(HOST_COLLAPSE_PREFIX + group.dataset.hostKey, collapsed ? '1' : '0');
+      } catch (e) { /* ignore */ }
+    });
   });
+
+  const searchForm = document.getElementById('search-form');
+  if (searchForm) {
+    initSearchHotkey(searchForm);
+    if (searchForm.dataset.liveSearch) initLiveSearch(searchForm);
+  }
 
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
@@ -289,22 +487,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const panel = article.querySelector('.credentials-panel');
     const usernameEl = panel.querySelector('.credentials-username');
     const passwordEl = panel.querySelector('.credentials-password');
+    const errorEl = panel.querySelector('.credentials-error');
     const toggleBtn = panel.querySelector('.toggle-password-btn');
-    let loaded = false;
+    const copyBtn = panel.querySelector('.copy-password-btn');
+    const copyBtnHtml = copyBtn.innerHTML;
+    let request = null;
     let plainPassword = '';
+    let revealed = false;
+
+    // Cached, so the copy button awaits the fetch the reveal button already
+    // started rather than racing it or issuing a second request.
+    const loadCredentials = () => {
+      if (!request) {
+        request = fetch(btn.dataset.url, { method: 'POST', headers: csrfHeaders() })
+          .then(r => r.json())
+          .then(data => {
+            plainPassword = data.password || '';
+            usernameEl.textContent = data.username || '-';
+            passwordEl.textContent = plainPassword ? '••••••••' : '-';
+
+            if (data.decrypt_failed) {
+              errorEl.textContent = 'Stored password could not be decrypted. This usually means '
+                + 'SECRET_KEY changed since it was saved (set APP_CREDENTIALS_KEY to keep the two '
+                + 'independent). Re-enter the password on the service to fix it.';
+              errorEl.classList.remove('hidden');
+            }
+            // Nothing to reveal or copy if the password is missing or unreadable.
+            if (!plainPassword) {
+              toggleBtn.classList.add('hidden');
+              copyBtn.classList.add('hidden');
+            }
+            return data;
+          });
+      }
+      return request;
+    };
 
     btn.addEventListener('click', () => {
       if (panel.classList.contains('hidden')) {
-        if (!loaded) {
-          fetch(btn.dataset.url, { method: 'POST', headers: csrfHeaders() })
-            .then(r => r.json())
-            .then(data => {
-              usernameEl.textContent = data.username || '-';
-              plainPassword = data.password || '';
-              passwordEl.textContent = '••••••••';
-              loaded = true;
-            });
-        }
+        loadCredentials();
         panel.classList.remove('hidden');
         btn.innerHTML = '<i class="fa-solid fa-key mr-1"></i>Hide credentials';
       } else {
@@ -313,10 +534,20 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
+    copyBtn.addEventListener('click', () => {
+      loadCredentials().then(() => {
+        if (!plainPassword) return;
+        copyToClipboard(plainPassword).then(
+          ok => flashButtonResult(copyBtn, copyBtnHtml, 'Copy password', ok));
+      });
+    });
+
     toggleBtn.addEventListener('click', () => {
-      const isHidden = passwordEl.textContent === '••••••••';
-      passwordEl.textContent = isHidden ? plainPassword || '-' : '••••••••';
-      toggleBtn.innerHTML = isHidden
+      revealed = !revealed;
+      passwordEl.textContent = revealed ? plainPassword : '••••••••';
+      toggleBtn.title = revealed ? 'Hide password' : 'Show password';
+      toggleBtn.setAttribute('aria-label', toggleBtn.title);
+      toggleBtn.innerHTML = revealed
         ? '<i class="fa-solid fa-eye-slash"></i>'
         : '<i class="fa-solid fa-eye"></i>';
     });

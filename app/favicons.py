@@ -28,6 +28,46 @@ def trigger_favicon_refresh_async(app, webui_id: int, site_url: str) -> None:
     thread.start()
 
 
+def trigger_favicon_backfill_async(app, webui_ids: list[int]) -> None:
+    """Resolve favicons for a batch of services on a single background thread.
+
+    An import can create dozens of services at once; calling
+    trigger_favicon_refresh_async per service would start that many threads and
+    fire the same number of simultaneous outbound requests. This walks the list
+    in order instead, one request at a time."""
+    if not webui_ids:
+        return
+
+    thread = Thread(
+        target=_backfill_favicons_task,
+        args=(app, list(webui_ids)),
+        name="webui-favicon-backfill",
+        daemon=True,
+    )
+    thread.start()
+
+
+def _backfill_favicons_task(app, webui_ids: list[int]) -> None:
+    def _work():
+        for webui_id in webui_ids:
+            webui = db.session.get(WebUI, webui_id)
+            # Skip anything deleted, re-pointed or already resolved since the
+            # import - and keep going if one service is unreachable, so a single
+            # bad URL can't abandon the rest of the batch.
+            if webui is None or not webui.url or webui.favicon_url:
+                continue
+            try:
+                favicon_url = resolve_favicon(webui.url)
+            except Exception:
+                app.logger.exception("Favicon backfill failed for webui %s", webui_id)
+                continue
+            if favicon_url:
+                webui.favicon_url = favicon_url
+                db.session.commit()
+
+    run_with_app_context(app, _work, "Background favicon backfill failed.")
+
+
 def _refresh_favicon_task(app, webui_id: int, site_url: str) -> None:
     def _work():
         favicon_url = resolve_favicon(site_url)

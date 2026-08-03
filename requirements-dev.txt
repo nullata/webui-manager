@@ -1,0 +1,6 @@
+# Test-only dependencies. Not installed in the Docker image.
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   playwright install chromium      # one-off, for the browser tests
+-r requirements.txt
+pytest==9.1.1
+playwright==1.60.0
