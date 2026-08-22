@@ -52,7 +52,7 @@ from sqlalchemy.orm import joinedload
 
 from .auth import login_required
 from .favicons import trigger_favicon_backfill_async, trigger_favicon_refresh_async
-from .healthchecks import get_app_settings, notify_settings_changed, trigger_healthcheck_pass_async
+from .healthchecks import notify_settings_changed, trigger_healthcheck_pass_async
 from .models import Category, HealthCheckLog, Host, User, WebUI, db
 
 _SERVICE_TYPE_LABELS = {
@@ -63,11 +63,6 @@ from .utils import decrypt_secret, encrypt_secret, normalize_url
 
 
 main_bp = Blueprint("main", __name__)
-
-
-@main_bp.before_request
-def _load_settings() -> None:
-    g.app_settings = get_app_settings()
 
 
 @main_bp.route("/")

@@ -14,11 +14,11 @@
 
 import re
 
-from flask import Flask, flash, redirect, render_template, request, send_from_directory, url_for
+from flask import Flask, flash, g, redirect, render_template, request, send_from_directory, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 from .config import Config
-from .healthchecks import start_healthcheck_worker
+from .healthchecks import get_app_settings, start_healthcheck_worker
 from .models import db
 from .routes import main_bp
 from .auth import auth_bp, init_auth
@@ -268,6 +268,14 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     start_healthcheck_worker(app)
+
+    @app.before_request
+    def _load_app_settings():
+        # App-level (not blueprint-level) so g.app_settings is also available
+        # when an error handler renders a page — e.g. a 404 raised by an
+        # unknown URL matches no blueprint, whose before_request hooks never
+        # run, and base.html would otherwise skip the background image.
+        g.app_settings = get_app_settings()
 
     @app.cli.command("create-admin")
     def create_admin() -> None:
