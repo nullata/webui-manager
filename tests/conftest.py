@@ -36,6 +36,14 @@ os.environ["AUTO_MIGRATE"] = "true"
 # Keep a rotated SECRET_KEY from being a silent variable in credential tests.
 os.environ.pop("APP_CREDENTIALS_KEY", None)
 
+# Optional: point the suite at a real PostgreSQL. Setting POSTGRES_TEST_URL
+# maps it onto DATABASE_URL, which the config honours ahead of the DB_* vars,
+# so the engine (and therefore the auto-migrator's dialect) becomes Postgres.
+# Select only these tests with `pytest -m postgres`.
+_pg_url = os.environ.get("POSTGRES_TEST_URL")
+if _pg_url:
+    os.environ["DATABASE_URL"] = _pg_url
+
 from app import create_app  # noqa: E402
 from app.models import Category, Host, User, WebUI, db  # noqa: E402
 

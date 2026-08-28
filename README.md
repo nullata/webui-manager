@@ -18,7 +18,7 @@ A self-hosted Flask app for organizing and launching your internal web services.
 - Optional stored credentials (AES-encrypted at rest), copyable without revealing them
 - Export and import the whole catalog as JSON, for backup or bulk-adding services
 - Background image upload with MIME type validation and 10 MB size limit
-- MySQL/MariaDB or self-contained SQLite backend, with automatic schema creation and migration on startup
+- MySQL/MariaDB, PostgreSQL, or self-contained SQLite backend, with automatic schema creation and migration on startup
 
 ## Service Types
 
@@ -32,7 +32,7 @@ Each entry has a service type that controls how the dashboard renders it.
 ## Requirements
 
 - Python 3.12+
-- **MySQL/MariaDB** (default) — or use **SQLite** for self-contained deployments
+- **MySQL/MariaDB** (default), **PostgreSQL** — or use **SQLite** for self-contained deployments
 
 ## Setup
 
@@ -67,6 +67,42 @@ flask --app run.py run
 
 Tables are created automatically on startup. Navigate to `/` and follow the admin setup prompt.
 
+### PostgreSQL
+
+PostgreSQL 14+ works as a first-class backend. The same environment variables
+are used as MySQL (`DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_NAME`) — only the
+port and backend switch:
+
+```bash
+# 1-3. Virtual env, dependencies, .env as in the MySQL setup above
+
+# 4. Set the backend in .env
+#    DB_TYPE=postgres
+#    DB_PORT=5432
+#    DB_NAME=webui_manager
+#    DB_HOST=127.0.0.1
+#    (optionally DB_SSLMODE=require for an SSL-enabled server)
+
+# 5. Create the database and user
+psql -U postgres <<'SQL'
+CREATE DATABASE webui_manager;
+CREATE USER webui WITH PASSWORD 'changeme';
+GRANT ALL PRIVILEGES ON DATABASE webui_manager TO webui;
+SQL
+
+# 6. Run
+flask --app run.py run
+```
+
+Tables are created automatically on startup, and the startup auto-migration
+handles schema sync the same way as on MySQL. Navigate to `/` and follow the
+admin setup prompt.
+
+> **Case sensitivity:** PostgreSQL compares strings case-sensitively where
+> MySQL's default collation does not. Usernames are matched
+> case-insensitively on all backends (storage keeps the case you entered), so
+> `admin`, `Admin` and `ADMIN` all refer to the same account.
+
 ### SQLite (self-contained, no external database)
 
 For single-user or simple deployments, set `DB_TYPE=sqlite` in your `.env` (or as an environment variable). The database file is stored at `DB_PATH` (default: `data/webui_manager.sqlite`).
@@ -94,14 +130,15 @@ The SQLite file is created automatically under `data/webui_manager.sqlite` on st
 | Variable | Required | Description |
 |---|---|---|
 | `SECRET_KEY` | Yes | Flask session signing key |
-| `DB_TYPE` | No | Database backend: `mysql` (default) or `sqlite` |
-| `DB_USER` | Conditional | MySQL username (required when `DB_TYPE=mysql`) |
-| `DB_PASSWORD` | Conditional | MySQL password (required when `DB_TYPE=mysql`) |
-| `DB_HOST` | No | MySQL host (default: `127.0.0.1`) |
-| `DB_PORT` | No | MySQL port (default: `3306`) |
+| `DB_TYPE` | No | Database backend: `mysql` (default), `sqlite`, or `postgres` |
+| `DB_USER` | Conditional | Database username (required when `DB_TYPE=mysql` or `postgres`) |
+| `DB_PASSWORD` | Conditional | Database password (required when `DB_TYPE=mysql` or `postgres`) |
+| `DB_HOST` | No | Database host (default: `127.0.0.1`) |
+| `DB_PORT` | No | Database port (default: `3306` for MySQL, `5432` for PostgreSQL) |
 | `DB_NAME` | No | Database name (default: `webui_manager`) |
+| `DB_SSLMODE` | No | PostgreSQL SSL mode (e.g. `require`; ignored by MySQL/SQLite) |
 | `DB_PATH` | No | SQLite file path (default: `data/webui_manager.sqlite`) |
-| `DATABASE_URL` | No | Full SQLAlchemy URL, overrides `DB_TYPE` and all `DB_*` fields |
+| `DATABASE_URL` | No | Full SQLAlchemy URL, overrides `DB_TYPE` and all `DB_*` fields (e.g. `postgresql+psycopg://webui:password@127.0.0.1:5432/webui_manager`) |
 | `APP_CREDENTIALS_KEY` | No | Separate key for credential encryption (falls back to `SECRET_KEY`) |
 | `AUTO_MIGRATE` | No | Sync existing tables to the current schema on startup (default: `true`). Missing tables are always created regardless |
 
@@ -265,6 +302,19 @@ volumes:
 docker compose up -d
 ```
 
+### 2e. Docker Compose — PostgreSQL backend
+
+`docker-compose.postgres.yml` layers a `postgres:16` service (with a
+persistent volume) onto the default compose file and points the app at it, so
+the default `docker compose up` (MySQL) is untouched:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build -d
+```
+
+Set `DB_PORT`, `DB_NAME` and any SSL mode in `.env` if they differ from the
+defaults; `DB_HOST` and `DB_TYPE` are set by the override file.
+
 ### First run
 
 Once the container is running, navigate to `http://localhost:5000` (or your configured port). Tables are created automatically on startup - follow the on-screen admin setup prompt.
@@ -274,6 +324,47 @@ Once the container is running, navigate to `http://localhost:5000` (or your conf
 Schema migrations run automatically on startup (`AUTO_MIGRATE`, on by default): missing tables and columns are created, nullable and column-type changes are applied, and missing indexes, unique constraints, and MyISAM→InnoDB conversions are handled. Upgrading from any earlier version - including pre-service-type deployments - is just a matter of deploying the new version and restarting. Backing up your database before upgrading is still recommended.
 
 The plain SQL scripts in the `migrations/` directory are redundant with auto-migration and kept for reference; they are only needed if you run with `AUTO_MIGRATE=false` and want to apply schema changes by hand.
+
+## Migrating to PostgreSQL
+
+WebUI Manager can run on MySQL, PostgreSQL or SQLite — moving between any two
+of them is a data export/import, not a schema migration. The JSON export in
+**Settings → Backup & Restore** captures the catalog (services, hosts,
+categories, favicons), and import rebuilds it on the new backend.
+
+Two things the catalog export **does not** carry, so plan for them:
+
+- **Users.** Accounts are not in the export. On the fresh install, create the
+  admin via the first-run setup screen (`/` prompts automatically on an empty
+  DB) or from the CLI: `flask --app run.py create-admin`.
+- **App settings** (SMTP, dashboard options, healthcheck config) and healthcheck
+  history are not exported either — re-enter settings on the new install.
+
+Steps:
+
+1. **Back up the old database first** (a raw dump of MySQL/SQLite is fine — you
+   are *not* moving it across engines, but keep it until you've confirmed the
+   import).
+2. On the current install, export: **Settings → Backup & Restore → Export**.
+   **Tick "include passwords"** — the export writes them as *plaintext* (the
+   stored Fernet ciphertext is bound to this install's key and is never in the
+   file), and a password-less export drops them entirely. They cannot be
+   recovered afterwards. On import they are re-encrypted with the target
+   install's key.
+3. Stand up the app against PostgreSQL (`DB_TYPE=postgres` — see the setup
+   section or `docker-compose.postgres.yml`) and let it boot once: on the empty
+   database `db.create_all()` builds the full schema.
+4. Create the admin (see above), then import the exported JSON:
+   **Settings → Backup & Restore → Import**. Services, hosts, categories and
+   favicons are recreated.
+
+The database itself is never copied byte-for-byte between engines — the schema
+is rebuilt from the models and the catalog flows through JSON.
+
+> **Large installs:** the case-insensitive username lookup (`lower(username)`)
+> can't use the plain unique index on PostgreSQL. That's a non-issue at
+> homelab scale, but if an install ever grows past a handful of users, add a
+> functional index: `CREATE INDEX ON "user" (lower(username));`
 
 ## Development
 

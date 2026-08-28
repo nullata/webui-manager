@@ -1,0 +1,39 @@
+# Optional: run WebUI Manager against PostgreSQL instead of the default MySQL.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+#
+# The default compose file (and the `DB_TYPE` it omits, i.e. MySQL) is left
+# untouched; this override swaps in the backend and adds a managed
+# postgres:16 service with a persistent volume.
+
+services:
+  app:
+    environment:
+      DB_TYPE: postgres
+      DB_HOST: db
+      # Literal on purpose: a .env that still carries MySQL's DB_PORT=3306
+      # would otherwise be interpolated in. Change here if your Postgres runs
+      # on a non-standard port.
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-webui}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-webui_manager}
+      # DB_SSLMODE: ${DB_SSLMODE:-disable}   # uncomment for SSL-enabled servers
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-webui_manager}
+      POSTGRES_USER: ${DB_USER:-webui}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-webui} -d ${DB_NAME:-webui_manager}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db_data:

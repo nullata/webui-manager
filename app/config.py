@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import urllib.parse
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -44,6 +45,25 @@ def _build_sqlite_uri(path: str) -> str:
     return f"sqlite:///{p.resolve()}"
 
 
+def _server_uri(driver: str, default_user: str, default_password: str, default_port: str) -> str:
+    """Build a {driver}:// URI from the shared DB_* env vars.
+
+    MySQL/MariaDB and PostgreSQL share the same variable names; only the
+    driver, the fallback credentials and the default port differ.
+    """
+    user = os.getenv("DB_USER", default_user)
+    password = os.getenv("DB_PASSWORD", default_password)
+    host = os.getenv("DB_HOST", "127.0.0.1")
+    port = os.getenv("DB_PORT", default_port)
+    name = os.getenv("DB_NAME", "webui_manager")
+    # quote_plus keeps credentials containing URL metacharacters
+    # (e.g. '@', '#', ':') from breaking the URI apart.
+    return (
+        f"{driver}://{urllib.parse.quote_plus(user)}:"
+        f"{urllib.parse.quote_plus(password)}@{host}:{port}/{name}"
+    )
+
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
     APP_CREDENTIALS_KEY = os.getenv("APP_CREDENTIALS_KEY")  # optional separate key for credential encryption
@@ -71,19 +91,19 @@ class Config:
     if _DB_TYPE == "sqlite":
         # DATABASE_URL takes priority; otherwise build from DB_PATH
         SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL") or _build_sqlite_uri(_SQLITE_PATH)
+    elif _DB_TYPE in ("postgres", "postgresql", "pg"):
+        # PostgreSQL (psycopg 3 driver). Reuses the same DB_* variables as MySQL.
+        # DB_SSLMODE (optional) is appended as the sslmode query parameter.
+        uri = _server_uri("postgresql+psycopg", "postgres", "postgres", "5432")
+        sslmode = os.getenv("DB_SSLMODE")
+        if sslmode:
+            uri += "?sslmode=" + sslmode.strip()
+        SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL") or uri
     else:
         # MySQL / MariaDB (default)
-        _db_user = os.getenv("DB_USER", "root")
-        _db_password = os.getenv("DB_PASSWORD", "password")
-        _db_host = os.getenv("DB_HOST", "127.0.0.1")
-        _db_port = os.getenv("DB_PORT", "3306")
-        _db_name = os.getenv("DB_NAME", "webui_manager")
-
+        uri = _server_uri("mysql+pymysql", "root", "password", "3306") + "?charset=utf8mb4"
         # DATABASE_URL takes priority over the individual db vars
-        SQLALCHEMY_DATABASE_URI = os.getenv(
-            "DATABASE_URL",
-            f"mysql+pymysql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}?charset=utf8mb4",
-        )
+        SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL") or uri
 
     # Engine options follow the *resolved* URI, not DB_TYPE, so a DATABASE_URL
     # pointing at the other backend still gets the right options.
@@ -96,10 +116,13 @@ class Config:
             "connect_args": {"check_same_thread": False, "timeout": 15},
         }
     else:
-        # Connection-pool hardening. MySQL closes idle connections after wait_timeout
-        # (and proxies/load balancers often much sooner), which surfaces as
-        # "Lost connection to MySQL server during query" (2013) or "MySQL server has
-        # gone away" (2006) on the next request that reuses a stale pooled connection.
+        # Connection-pool hardening. MySQL and PostgreSQL both close idle
+        # connections after a server-side timeout (MySQL's wait_timeout;
+        # PostgreSQL's statement/idle timeout and connection limits), and
+        # proxies/load balancers often much sooner — which surfaces as
+        # "Lost connection to MySQL server during query" (2013) or
+        # "MySQL server has gone away" (2006) on the next request that
+        # reuses a stale pooled connection.
         #   - pool_pre_ping issues a lightweight liveness check before handing out a
         #     connection and transparently reconnects if it's dead.
         #   - pool_recycle proactively discards connections older than the interval so

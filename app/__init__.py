@@ -28,21 +28,40 @@ csrf = CSRFProtect()
 
 # -----------------------------------------------------------------------
 # Auto-migration: compares SQLAlchemy model metadata against the live DB
-# and applies any differences.  Covers (MySQL/MariaDB):
-#   1. Missing tables → db.create_all() (called before this function)
-#   2. Missing columns → ALTER TABLE ... ADD COLUMN
-#   3. Nullable changes → ALTER TABLE ... MODIFY COLUMN
-#   4. Column type mismatches (e.g. VARCHAR length) → MODIFY COLUMN
-#   5. Missing indexes → CREATE INDEX
-#   6. Missing unique constraints → UNIQUE INDEX
-#   7. Engine changes (MyISAM → InnoDB) → ALTER TABLE ... ENGINE
+# and applies any differences.  What gets applied depends on the dialect
+# (see the branches in _apply_auto_migrations):
 #
-# For SQLite, only missing columns and indexes are applied since SQLite
-# ALTER TABLE is limited (no MODIFY COLUMN, no ADD UNIQUE INDEX).
+#   MySQL/MariaDB:
+#     1. Missing tables → db.create_all() (called before this function)
+#     2. Missing columns → ALTER TABLE ... ADD COLUMN
+#     3. Nullable changes / column type mismatches → MODIFY COLUMN
+#     4. Missing indexes → CREATE INDEX
+#     5. Missing unique constraints → ADD UNIQUE INDEX
+#     6. Engine changes (MyISAM → InnoDB) → ALTER TABLE ... ENGINE
+#
+#   PostgreSQL:
+#     1. Missing tables → db.create_all()
+#     2. Missing columns → ALTER TABLE ... ADD COLUMN
+#     3. Nullable changes → ALTER COLUMN ... SET/DROP NOT NULL
+#     4. Missing indexes → CREATE INDEX
+#     5. Missing unique constraints → ADD CONSTRAINT ... UNIQUE
+#     Column *type* mismatches are logged but not applied:
+#     ALTER COLUMN TYPE ... USING can silently corrupt data, so v1 leaves
+#     that to the operator until there's a real migration case to test
+#     against.
+#
+#   SQLite (limited):
+#     Missing tables / columns / indexes only — SQLite ALTER TABLE cannot
+#     change column definitions or add unique constraints post-creation.
+#
+# Unknown dialects only get the additive steps (missing tables/columns/
+# indexes), never the DDL that rewrites existing columns.
 # -----------------------------------------------------------------------
 
-def _is_sqlite() -> bool:
-    return db.engine.dialect.name == "sqlite"
+def _dialect_name() -> str:
+    # e.g. "mysql", "sqlite", "postgresql" — decides which DDL each
+    # migration step below emits.
+    return db.engine.dialect.name
 
 
 # Compile a model type to its DDL label for the active dialect,
@@ -56,18 +75,30 @@ _INT_DISPLAY_WIDTH = re.compile(r"^(tinyint|smallint|mediumint|int|integer|bigin
 
 # Normalise a type label so the model side and the DB side compare equal
 # when they mean the same storage type. The DB side arrives as a reflected
-# TypeEngine object (stringify first); MySQL/MariaDB report booleans as
-# tinyint(1) while the model compiles to BOOL, and MariaDB attaches display
-# widths to integers (int(11)) that the model side lacks.
-def _normalise_type(raw) -> str:
+# TypeEngine object (stringify first). Dialects spell the same storage type
+# differently: MySQL/MariaDB report booleans as tinyint(1) (bare tinyint on
+# MariaDB 11+) while the model compiles to BOOL; MariaDB attaches display
+# widths to integers (int(11)); PostgreSQL reports VARCHAR(n) and BOOLEAN.
+def _normalise_type(raw, dialect: str) -> str:
     label = str(raw).strip().lower()
     label = _INT_DISPLAY_WIDTH.sub(lambda m: m.group(1), label)
-    # MySQL reports booleans as tinyint(1), MariaDB 11+ as bare tinyint
-    # (display widths were removed) — both are the storage type of BOOL.
-    if label in ("bool", "boolean", "tinyint"):
+    if label in ("bool", "boolean"):
+        return "bool"
+    if dialect == "mysql" and label == "tinyint":
         return "bool"
     if label == "integer":
         label = "int"
+    # PostgreSQL reflection spells the default timestamp type out fully;
+    # the model side compiles to bare TIMESTAMP. Fold it so a DateTime
+    # column on Postgres doesn't read as a permanent "type mismatch".
+    if dialect == "postgresql":
+        for suffix in (" without time zone", " with time zone"):
+            if label.endswith(suffix):
+                label = label[: -len(suffix)]
+                break
+    # Some PostgreSQL entry points report the long spelling; fold it to the
+    # short one so model side ("VARCHAR(n)") and DB side compare equal.
+    label = label.replace("character varying", "varchar")
     return label
 
 
@@ -87,9 +118,8 @@ def _execute_ddl(app: Flask, ddl: str) -> None:
 def _apply_auto_migrations(app: Flask) -> None:
     from sqlalchemy import inspect
 
-    use_sqlite = _is_sqlite()
-    mode = "SQLite (limited)" if use_sqlite else "MySQL"
-    app.logger.info("Auto-migrate: starting schema sync (%s mode)", mode)
+    dialect = _dialect_name()
+    app.logger.info("Auto-migrate: starting schema sync (%s mode)", dialect)
 
     inspector = inspect(db.engine)
     existing_tables = set(inspector.get_table_names())
@@ -126,29 +156,27 @@ def _apply_auto_migrations(app: Flask) -> None:
             ddl = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {_type_label(col_def.type)}"
             if not col_def.nullable:
                 ddl += " NOT NULL"
-            ddl += _sql_default_clause(col_def, use_sqlite)
+            ddl += _sql_default_clause(col_def, dialect)
             app.logger.info("Auto-migrate: adding column %s.%s — %s", table_name, col_name, ddl)
             _execute_ddl(app, ddl)
 
-        # --- 2. Nullable changes / type mismatches (MySQL only — SQLite
-        # can't MODIFY COLUMN). Columns added in step 1 aren't in db_columns
-        # and are skipped: they already match the model. ---
-        if not use_sqlite:
-            for col_def in table.columns:
-                col_name = col_def.name
-                if col_name not in db_columns:
-                    continue
-                # Never MODIFY a primary key: a bare MODIFY COLUMN silently
-                # drops AUTO_INCREMENT, breaking inserts.
-                if col_def.primary_key:
-                    continue
-                existing = db_columns[col_name]
-                nullable_differs = existing["nullable"] != col_def.nullable
-                expected = _normalise_type(_type_label(col_def.type))
-                actual = _normalise_type(existing["type"])
-                type_differs = expected != actual
-                if not (nullable_differs or type_differs):
-                    continue
+        # --- 2. Nullable changes / type mismatches ---
+        # Columns added in step 1 aren't in db_columns and are skipped: they
+        # already match the model. Primary keys are never touched: rewriting
+        # them can silently drop the autoincrement behaviour.
+        for col_def in table.columns:
+            col_name = col_def.name
+            if col_name not in db_columns or col_def.primary_key:
+                continue
+            existing = db_columns[col_name]
+            nullable_differs = existing["nullable"] != col_def.nullable
+            expected = _normalise_type(_type_label(col_def.type), dialect)
+            actual = _normalise_type(existing["type"], dialect)
+            type_differs = expected != actual
+            if not (nullable_differs or type_differs):
+                continue
+
+            if dialect == "mysql":
                 # MODIFY COLUMN keeps existing indexes/uniques on the column;
                 # only the type and nullability need restating.
                 ddl = (
@@ -166,6 +194,35 @@ def _apply_auto_migrations(app: Flask) -> None:
                     app.logger.info("Auto-migrate: changing nullable on %s.%s — %s", table_name, col_name, ddl)
                 _execute_ddl(app, ddl)
 
+            elif dialect == "postgresql":
+                # SET/DROP NOT NULL is a standalone statement (no MODIFY
+                # COLUMN in Postgres). Type changes are logged but NOT
+                # applied in v1: ALTER COLUMN TYPE needs a USING clause to
+                # be safe on existing data, and a wrong one corrupts rows.
+                if type_differs:
+                    app.logger.warning(
+                        "Auto-migrate: type mismatch on %s.%s — DB has %s, model wants %s. "
+                        "Not applied automatically; run "
+                        "ALTER COLUMN %s TYPE %s USING ... manually.",
+                        table_name, col_name, actual, expected, col_name, expected,
+                    )
+                    continue
+                ddl = (
+                    f"ALTER TABLE {table_name} ALTER COLUMN {col_name} "
+                    + ("SET NOT NULL" if not col_def.nullable else "DROP NOT NULL")
+                )
+                app.logger.info("Auto-migrate: changing nullable on %s.%s — %s", table_name, col_name, ddl)
+                _execute_ddl(app, ddl)
+
+            else:
+                # SQLite (or unknown dialect): ALTER COLUMN is not possible;
+                # log so an operator upgrading an old install can see it.
+                if type_differs:
+                    app.logger.info(
+                        "Auto-migrate: type mismatch on %s.%s — DB has %s, model wants %s (not applied on this backend).",
+                        table_name, col_name, actual, expected,
+                    )
+
         # --- 3. Missing indexes ---
         for col_def in table.columns:
             col_name = col_def.name
@@ -176,19 +233,23 @@ def _apply_auto_migrations(app: Flask) -> None:
             app.logger.info("Auto-migrate: adding index %s.%s — %s", table_name, col_name, ddl)
             _execute_ddl(app, ddl)
 
-        # --- 4. Missing unique constraints (MySQL only — SQLite can't add unique post-creation) ---
-        if not use_sqlite:
+        # --- 4. Missing unique constraints (MySQL and PostgreSQL only —
+        # SQLite can't add unique post-creation) ---
+        if dialect in ("mysql", "postgresql"):
             for col_def in table.columns:
                 col_name = col_def.name
                 if not col_def.unique or col_name in db_unique_cols:
                     continue
                 uq_name = f"uq_{table_name}_{col_name}"
-                ddl = f"ALTER TABLE {table_name} ADD UNIQUE INDEX {uq_name} ({col_name})"
+                if dialect == "mysql":
+                    ddl = f"ALTER TABLE {table_name} ADD UNIQUE INDEX {uq_name} ({col_name})"
+                else:
+                    ddl = f"ALTER TABLE {table_name} ADD CONSTRAINT {uq_name} UNIQUE ({col_name})"
                 app.logger.info("Auto-migrate: adding unique constraint %s.%s — %s", table_name, col_name, ddl)
                 _execute_ddl(app, ddl)
 
         # --- 5. Engine: ensure InnoDB (MySQL only) ---
-        if not use_sqlite:
+        if dialect == "mysql":
             wanted_engine = (table.kwargs.get("mysql_engine") or "").lower()
             current_engine = (inspector.get_table_options(table_name).get("mysql_engine") or "").lower()
             if wanted_engine and current_engine and wanted_engine != current_engine:
@@ -199,7 +260,7 @@ def _apply_auto_migrations(app: Flask) -> None:
     app.logger.info("Auto-migrate: schema sync complete.")
 
 
-def _sql_default_clause(col_def, use_sqlite: bool) -> str:
+def _sql_default_clause(col_def, dialect: str) -> str:
     """DEFAULT clause for ADD COLUMN, or "" when none is needed.
 
     Literal model defaults are emitted as-is. Python-side callable defaults
@@ -213,7 +274,10 @@ def _sql_default_clause(col_def, use_sqlite: bool) -> str:
         default_val = getattr(col_def.default, "arg", col_def.default)
         if not callable(default_val):
             if isinstance(default_val, bool):
-                # MySQL and SQLite both store booleans as 0/1
+                # MySQL and SQLite store booleans as 0/1; PostgreSQL uses
+                # real boolean literals.
+                if dialect == "postgresql":
+                    return f" DEFAULT {str(default_val).upper()}"
                 return f" DEFAULT {int(default_val)}"
             if isinstance(default_val, str):
                 return " DEFAULT '{}'".format(default_val.replace("'", "''"))
@@ -223,11 +287,15 @@ def _sql_default_clause(col_def, use_sqlite: bool) -> str:
         return ""  # existing rows get NULL; the app fills new rows
 
     col_type = col_def.type
-    if isinstance(col_type, (Boolean, Integer, Numeric)):
+    if isinstance(col_type, Boolean):
+        # 0 works as a boolean default on MySQL/SQLite; PostgreSQL needs a
+        # real boolean literal.
+        return " DEFAULT FALSE" if dialect == "postgresql" else " DEFAULT 0"
+    if isinstance(col_type, (Integer, Numeric)):
         return " DEFAULT 0"
     if isinstance(col_type, DateTime):
         # SQLite only allows constant defaults in ADD COLUMN
-        return " DEFAULT '1970-01-01 00:00:00'" if use_sqlite else " DEFAULT CURRENT_TIMESTAMP"
+        return " DEFAULT '1970-01-01 00:00:00'" if dialect == "sqlite" else " DEFAULT CURRENT_TIMESTAMP"
     if isinstance(col_type, String):  # includes Text
         return " DEFAULT ''"
     return ""
@@ -282,6 +350,7 @@ def create_app() -> Flask:
         # cli helper to create an admin user without going through the web ui
         from getpass import getpass
 
+        from .auth import get_user_by_username
         from .models import User
 
         username = input("Username: ").strip()
@@ -289,9 +358,7 @@ def create_app() -> Flask:
             print("Username is required.")
             return
 
-        existing = db.session.scalar(
-            db.select(User).where(User.username == username))
-        if existing:
+        if get_user_by_username(username) is not None:
             print("User already exists.")
             return
 

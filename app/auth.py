@@ -70,6 +70,18 @@ def bootstrap_required() -> bool:
     return g.bootstrap_required
 
 
+def get_user_by_username(username: str):
+    """Look a user up by username, case-insensitively.
+
+    PostgreSQL compares strings case-sensitively while MySQL's default
+    collation does not, so plain ``User.username == username`` would let
+    "admin" and "Admin" log in on one backend but not the other. Lower-casing
+    both sides keeps the two backends behaving the same way.
+    """
+    return db.session.scalar(
+        db.select(User).where(func.lower(User.username) == username.lower()))
+
+
 def login_required(view):
     # decorator that redirects to setup if no users exist, or login if not authenticated
     @wraps(view)
@@ -115,8 +127,7 @@ def login():
         username = (request.form.get("username") or "").strip()
         password = (request.form.get("password") or "").strip()
 
-        user = db.session.scalar(
-            db.select(User).where(User.username == username))
+        user = get_user_by_username(username)
         if user and user.check_password(password):
             _clear_failures(ip)
             session.clear()
@@ -168,15 +179,22 @@ def setup_admin():
         elif password != password_confirm:
             flash("Passwords do not match.", "error")
         else:
+            if get_user_by_username(username) is not None:
+                flash("That username is already in use.", "error")
+                return render_template("setup_admin.html")
             user = User(username=username)
             user.set_password(password)
             db.session.add(user)
             try:
                 db.session.commit()
             except IntegrityError:
-                # shouldn't normally happen on first run but handle it cleanly
+                # Belt-and-braces race against the check above. Safe even
+                # though PostgreSQL's unique index is case-sensitive: the
+                # explicit check already used a case-insensitive comparison,
+                # and only a concurrent first-run setup could hit this path.
                 db.session.rollback()
                 flash("That username is already in use.", "error")
+                return render_template("setup_admin.html")
             else:
                 session.clear()
                 session["user_id"] = user.id
