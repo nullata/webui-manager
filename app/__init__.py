@@ -345,6 +345,32 @@ def create_app() -> Flask:
         # run, and base.html would otherwise skip the background image.
         g.app_settings = get_app_settings()
 
+    @app.context_processor
+    def inject_background_image_url():
+        # The background image is always saved as bg_image.<ext>, so its URL
+        # never changes when the pixels change and browsers happily serve the
+        # cached copy after a replace. Append the file's mtime so a new upload
+        # invalidates the cache without renaming (which would break shared-DB
+        # setups where the recorded name has to stay stable across hosts).
+        import os
+
+        def background_image_url():
+            settings = g.get("app_settings")
+            filename = getattr(settings, "background_image_filename", None) if settings else None
+            if not filename:
+                return None
+            url = url_for("static", filename="uploads/" + filename)
+            path = os.path.join(app.static_folder, "uploads", filename)
+            try:
+                return f"{url}?v={int(os.path.getmtime(path))}"
+            except OSError:
+                # File missing (e.g. shared DB, other host uploaded it). Return
+                # the bare URL so the browser 404s visibly instead of loading a
+                # stale cached image under the same name.
+                return url
+
+        return {"background_image_url": background_image_url}
+
     @app.cli.command("create-admin")
     def create_admin() -> None:
         # cli helper to create an admin user without going through the web ui

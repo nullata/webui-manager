@@ -45,6 +45,23 @@ def _uploads_dir() -> str:
     os.makedirs(path, exist_ok=True)
     return path
 
+
+def _purge_background_files() -> None:
+    # There must be exactly one bg_image.* on disk at a time. The DB only
+    # records the extension currently in use, so if a previous upload wrote
+    # bg_image.jpg and the next one is bg_image.png we'd leave the .jpg
+    # orphaned - and on shared-DB setups the wrong-extension file can even be
+    # what gets served. Sweep the whole family on every change instead of
+    # trusting the recorded filename.
+    uploads = _uploads_dir()
+    for name in os.listdir(uploads):
+        stem, ext = os.path.splitext(name)
+        if stem == "bg_image" and ext.lower() in _ALLOWED_IMAGE_EXTENSIONS:
+            try:
+                os.remove(os.path.join(uploads, name))
+            except OSError:
+                pass
+
 from flask import Blueprint, Response, current_app, flash, g, redirect, render_template, request, url_for, jsonify
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
@@ -440,11 +457,8 @@ def settings_page():
         bg_file = request.files.get("background_image")
 
         if clear_bg:
-            if settings.background_image_filename:
-                old = os.path.join(_uploads_dir(), settings.background_image_filename)
-                if os.path.exists(old):
-                    os.remove(old)
-                settings.background_image_filename = None
+            _purge_background_files()
+            settings.background_image_filename = None
         elif bg_file and bg_file.filename:
             ext = os.path.splitext(secure_filename(bg_file.filename))[1].lower()
             if ext not in _ALLOWED_IMAGE_EXTENSIONS:
@@ -459,10 +473,7 @@ def settings_page():
             if not _is_valid_image(bg_file.stream):
                 flash("File does not appear to be a valid image.", "error")
                 return render_template("settings.html", settings=settings, last_run=last_run)
-            if settings.background_image_filename:
-                old = os.path.join(_uploads_dir(), settings.background_image_filename)
-                if os.path.exists(old):
-                    os.remove(old)
+            _purge_background_files()
             filename = f"bg_image{ext}"
             bg_file.save(os.path.join(_uploads_dir(), filename))
             settings.background_image_filename = filename

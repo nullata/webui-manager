@@ -11,10 +11,11 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
-  {% if g.get('app_settings') and g.app_settings.background_image_filename %}
+  {% set _bg_url = background_image_url() %}
+  {% if _bg_url %}
   <style>
     body {
-      background-image: url("{{ url_for('static', filename='uploads/' + g.app_settings.background_image_filename) }}") !important;
+      background-image: url("{{ _bg_url }}") !important;
       background-size: cover;
       background-position: center;
     }
