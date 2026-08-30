@@ -20,9 +20,16 @@ services:
       # above are then ignored) and the volumes sections to persist the file.
       # DB_TYPE: sqlite
       # DB_PATH: /data/webui_manager.sqlite
-    # volumes:
+    volumes:
+      # Persist user-uploaded background images across container rebuilds.
+      # Without this, `docker compose up --build` wipes the uploads dir and
+      # the image row in the DB then points at a filename that no longer
+      # exists (or, worse, at a stale file baked into the image itself).
+      - uploads:/app/app/static/uploads
+    # SQLite data: uncomment along with the DB_TYPE=sqlite lines above.
     #   - db_data:/data
 
-# volumes:
-#   db_data:
+volumes:
+  uploads:
+  # db_data:
 

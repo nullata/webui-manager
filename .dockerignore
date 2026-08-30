@@ -6,9 +6,17 @@ __pycache__/
 .env
 .git/
 .gitignore
-*.jpg
-*.png
+# NB: * doesn't match / in .dockerignore, so bare *.jpg only excludes files at
+# the top level of the build context - a bg_image.jpg sitting in
+# app/static/uploads/ would still be baked into the image. Use **/ to recurse.
+**/*.jpg
+**/*.png
 *.md
+
+# User-uploaded background images. Kept out of the image on principle even
+# with the recursive globs above, and persisted at runtime via a volume in
+# docker-compose.yml so an upload survives `docker compose up --build`.
+app/static/uploads/
 docker-compose.yml
 LICENSE
 VERSION
