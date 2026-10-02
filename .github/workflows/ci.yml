@@ -30,7 +30,7 @@ jobs:
 
       # SQLite backend, no browser — the fast suite (~25s locally).
       - name: Test
-        run: pytest -m "not browser and not postgres"
+        run: python -m pytest -m "not browser and not postgres"
 
   postgres:
     runs-on: ubuntu-latest
@@ -69,7 +69,7 @@ jobs:
       - name: Test
         env:
           POSTGRES_TEST_URL: postgresql://webui:***@localhost:5432/webui_test
-        run: pytest -m postgres
+        run: python -m pytest -m postgres
 
   browser:
     runs-on: ubuntu-latest
@@ -90,4 +90,4 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Test
-        run: pytest -m browser
+        run: python -m pytest -m browser
