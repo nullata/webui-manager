@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Equivalent of nullGuard's `go vet`: catch syntax/encoding errors
+      # without importing anything.
+      - name: Compile check
+        run: python -m compileall -q app run.py
+
+      # SQLite backend, no browser — the fast suite (~25s locally).
+      - name: Test
+        run: pytest -m "not browser and not postgres"
+
+  postgres:
+    runs-on: ubuntu-latest
+    env:
+      # Throwaway credentials for the ephemeral CI container only.
+      PG_CI_USER: webui
+      PG_CI_PASS: ci-only-not-a-secret
+      PG_CI_DB: webui_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ${{ env.PG_CI_USER }}
+          POSTGRES_PASSWORD:
+            ${{ env.PG_CI_PASS }}
+          POSTGRES_DB: ${{ env.PG_CI_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ env.PG_CI_USER }} -d ${{ env.PG_CI_DB }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # conftest.py maps POSTGRES_TEST_URL onto DATABASE_URL, switching the
+    # app's engine to the Postgres dialect for the -m postgres tests.
+    # (Set on the test step below so it can interpolate env.)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Test
+        env:
+          POSTGRES_TEST_URL: postgresql://${{ env.PG_CI_USER }}:${{ env.PG_CI_PASS }}@localhost:5432/${{ env.PG_CI_DB }}
+        run: pytest -m postgres
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          playwright install --with-deps chromium
+
+      - name: Test
+        run: pytest -m browser
