@@ -34,29 +34,24 @@ jobs:
 
   postgres:
     runs-on: ubuntu-latest
-    env:
-      # Throwaway credentials for the ephemeral CI container only.
-      PG_CI_USER: webui
-      PG_CI_PASS: ci-only-not-a-secret
-      PG_CI_DB: webui_test
     services:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: ${{ env.PG_CI_USER }}
+          # Throwaway credentials for the ephemeral CI container only.
+          POSTGRES_USER: webui
           POSTGRES_PASSWORD:
-            ${{ env.PG_CI_PASS }}
-          POSTGRES_DB: ${{ env.PG_CI_DB }}
+            ci-only-not-a-secret
+          POSTGRES_DB: webui_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U ${{ env.PG_CI_USER }} -d ${{ env.PG_CI_DB }}"
+          --health-cmd "pg_isready -U webui -d webui_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     # conftest.py maps POSTGRES_TEST_URL onto DATABASE_URL, switching the
     # app's engine to the Postgres dialect for the -m postgres tests.
-    # (Set on the test step below so it can interpolate env.)
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +68,7 @@ jobs:
 
       - name: Test
         env:
-          POSTGRES_TEST_URL: postgresql://${{ env.PG_CI_USER }}:${{ env.PG_CI_PASS }}@localhost:5432/${{ env.PG_CI_DB }}
+          POSTGRES_TEST_URL: postgresql://webui:***@localhost:5432/webui_test
         run: pytest -m postgres
 
   browser:
