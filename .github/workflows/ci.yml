@@ -68,7 +68,7 @@ jobs:
 
       - name: Test
         env:
-          POSTGRES_TEST_URL: postgresql://webui:***@localhost:5432/webui_test
+          POSTGRES_TEST_URL: postgresql://webui:ci-only-not-a-secret@localhost:5432/webui_test
         run: python -m pytest -m postgres
 
   browser:
